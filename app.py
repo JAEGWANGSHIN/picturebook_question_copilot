@@ -28,21 +28,284 @@ SAFETY_NOTICE = """
 
 CARD_CSS = """
 <style>
-.card {
-    border: 1px solid #e6e6e6;
-    border-radius: 16px;
-    padding: 18px;
-    margin-bottom: 12px;
-    background: #ffffff;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+@import url('https://fonts.googleapis.com/css2?family=Jua&family=Nanum+Gothic:wght@400;700;800&display=swap');
+
+/* ── 전역 배경 & 폰트 ── */
+html, body, [data-testid="stAppViewContainer"] {
+    background: linear-gradient(135deg, #fff9f0 0%, #fff0fb 40%, #f0f8ff 100%) !important;
+    font-family: 'Nanum Gothic', sans-serif !important;
 }
-.card h4 { margin-top: 0; }
-.small { color: #666; font-size: 0.92rem; }
+
+/* 배경 도트 패턴 */
+[data-testid="stAppViewContainer"]::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle, #ffb3d966 1.5px, transparent 1.5px);
+    background-size: 32px 32px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ── 사이드바 ── */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #ff6b9d 0%, #c44ddb 50%, #7c4dff 100%) !important;
+    border-right: none !important;
+}
+[data-testid="stSidebar"] * {
+    color: #fff !important;
+}
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] .stMarkdown li {
+    color: #ffe4f5 !important;
+    font-size: 0.88rem;
+}
+[data-testid="stSidebar"] h1 {
+    font-family: 'Jua', sans-serif !important;
+    font-size: 1.4rem !important;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+[data-testid="stSidebar"] h3 {
+    font-family: 'Jua', sans-serif !important;
+    border-bottom: 2px solid rgba(255,255,255,0.3);
+    padding-bottom: 6px;
+    margin-top: 20px !important;
+}
+[data-testid="stSidebar"] [data-testid="stInfo"] {
+    background: rgba(255,255,255,0.15) !important;
+    border: 1px solid rgba(255,255,255,0.3) !important;
+    border-radius: 12px !important;
+    color: #fff !important;
+}
+
+/* ── 탭 스타일 ── */
+[data-testid="stTabs"] [role="tablist"] {
+    background: rgba(255,255,255,0.7);
+    border-radius: 20px;
+    padding: 4px 6px;
+    gap: 4px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 12px rgba(255,107,157,0.15);
+}
+[data-testid="stTabs"] [role="tab"] {
+    border-radius: 14px !important;
+    font-family: 'Nanum Gothic', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 0.82rem !important;
+    padding: 6px 14px !important;
+    transition: all 0.2s !important;
+    color: #666 !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    background: linear-gradient(135deg, #ff6b9d, #c44ddb) !important;
+    color: #fff !important;
+    box-shadow: 0 3px 10px rgba(255,107,157,0.4) !important;
+}
+
+/* ── 페이지 타이틀 ── */
+h1 {
+    font-family: 'Jua', sans-serif !important;
+    background: linear-gradient(135deg, #ff6b9d, #7c4dff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-size: 2.2rem !important;
+}
+h2, h3 {
+    font-family: 'Jua', sans-serif !important;
+    color: #5c3d8f !important;
+}
+
+/* ── 기본 카드 ── */
+.card {
+    border: none;
+    border-radius: 20px;
+    padding: 22px 24px;
+    margin-bottom: 14px;
+    background: #fff;
+    box-shadow: 0 4px 20px rgba(196,77,219,0.10), 0 1px 4px rgba(0,0,0,0.04);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #ff6b9d, #c44ddb, #7c4dff);
+}
+.card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 28px rgba(196,77,219,0.18);
+}
+.card h4 {
+    margin-top: 0;
+    font-family: 'Jua', sans-serif;
+    font-size: 1.05rem;
+    color: #5c3d8f;
+}
+.card p { color: #444; line-height: 1.7; }
+.small { color: #888; font-size: 0.88rem; }
+
+/* 홈 특화 카드 3종 */
+.card-pink::before  { background: linear-gradient(90deg, #ff6b9d, #ffb3d9); }
+.card-purple::before { background: linear-gradient(90deg, #c44ddb, #7c4dff); }
+.card-blue::before  { background: linear-gradient(90deg, #4db8ff, #7c4dff); }
+
+/* ── 히어로 배너 ── */
+.hero-banner {
+    background: linear-gradient(135deg, #ff6b9d 0%, #c44ddb 50%, #7c4dff 100%);
+    border-radius: 24px;
+    padding: 36px 40px;
+    margin-bottom: 28px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(196,77,219,0.3);
+}
+.hero-banner::after {
+    content: "📚";
+    position: absolute;
+    right: 40px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 5rem;
+    opacity: 0.25;
+}
+.hero-banner h1 {
+    font-family: 'Jua', sans-serif !important;
+    font-size: 2.2rem !important;
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
+    margin: 0 0 8px !important;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.15);
+}
+.hero-banner p {
+    color: rgba(255,255,255,0.9);
+    font-size: 1rem;
+    line-height: 1.6;
+    max-width: 680px;
+    margin: 0;
+}
+
+/* ── 흐름 배지 ── */
+.flow-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 12px 0 20px;
+}
+.flow-badge {
+    background: linear-gradient(135deg, #ff6b9d22, #7c4dff22);
+    border: 1.5px solid #c44ddb44;
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #7c4dff;
+}
+.flow-arrow {
+    color: #c44ddb;
+    font-weight: 900;
+    font-size: 1rem;
+}
+
+/* ── 섹션 헤더 ── */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: linear-gradient(135deg, #fff0fb, #f0f0ff);
+    border-radius: 14px;
+    padding: 12px 18px;
+    margin: 20px 0 14px;
+    border-left: 5px solid #c44ddb;
+}
+.section-header span {
+    font-family: 'Jua', sans-serif;
+    font-size: 1.1rem;
+    color: #5c3d8f;
+}
+
+/* ── 경고 박스 ── */
 .warning-box {
-    border-left: 5px solid #d9a441;
-    padding: 12px 16px;
-    background: #fffaf0;
-    border-radius: 8px;
+    border: none;
+    border-left: 5px solid #ffb347;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, #fffaf0, #fff5e0);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(255,179,71,0.15);
+}
+.warning-box ul { margin: 6px 0 0; padding-left: 18px; }
+.warning-box li { color: #7a5c00; font-size: 0.9rem; margin-bottom: 4px; }
+
+/* ── 버튼 ── */
+[data-testid="stButton"] > button[kind="primary"] {
+    background: linear-gradient(135deg, #ff6b9d, #c44ddb) !important;
+    border: none !important;
+    border-radius: 14px !important;
+    font-family: 'Jua', sans-serif !important;
+    font-size: 1rem !important;
+    padding: 10px 28px !important;
+    color: #fff !important;
+    box-shadow: 0 4px 15px rgba(255,107,157,0.4) !important;
+    transition: all 0.2s !important;
+}
+[data-testid="stButton"] > button[kind="primary"]:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px rgba(196,77,219,0.5) !important;
+}
+
+/* ── 다운로드 버튼 ── */
+[data-testid="stDownloadButton"] > button {
+    border-radius: 12px !important;
+    font-family: 'Nanum Gothic', sans-serif !important;
+    font-weight: 700 !important;
+}
+
+/* ── 입력 필드 ── */
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+    border-radius: 12px !important;
+    border: 1.5px solid #e0c8f0 !important;
+    background: #fdf8ff !important;
+    font-family: 'Nanum Gothic', sans-serif !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: #c44ddb !important;
+    box-shadow: 0 0 0 3px rgba(196,77,219,0.12) !important;
+}
+[data-testid="stSelectbox"] > div > div {
+    border-radius: 12px !important;
+    border: 1.5px solid #e0c8f0 !important;
+    background: #fdf8ff !important;
+}
+
+/* ── 성공/정보 알림 ── */
+[data-testid="stSuccess"] {
+    background: linear-gradient(135deg, #f0fff4, #e8ffee) !important;
+    border-left: 5px solid #52c41a !important;
+    border-radius: 12px !important;
+}
+[data-testid="stInfo"] {
+    background: linear-gradient(135deg, #f0f8ff, #e8f4ff) !important;
+    border-left: 5px solid #4db8ff !important;
+    border-radius: 12px !important;
+}
+
+/* ── 데이터프레임 ── */
+[data-testid="stDataFrame"] {
+    border-radius: 16px !important;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
+}
+
+/* ── 메인 영역 패딩 ── */
+[data-testid="stMainBlockContainer"] {
+    padding-top: 24px !important;
 }
 </style>
 """
@@ -112,75 +375,111 @@ def question_cards_view(cards: list[dict[str, str]]) -> None:
 
 
 with st.sidebar:
-    st.title("📚 질문수업 코파일럿")
+    st.markdown("# 📚 질문수업 코파일럿")
     st.caption("교사의 그림책 수업 설계를 돕는 Streamlit MVP")
-    st.markdown("### 안전 안내")
+    st.markdown("### 🔒 안전 안내")
     st.info(SAFETY_NOTICE)
-    st.markdown("### 현재 저장된 결과물")
+    st.markdown("### 🗂️ 현재 저장된 결과물")
     if st.session_state.results:
-        for v in st.session_state.results.values():
-            st.write("-", v["label"])
+        icons = {
+            "recommendations": "📖",
+            "scan_material": "🔍",
+            "question_cards": "❓",
+            "lesson_plan": "📋",
+            "worksheets": "📝",
+            "student_question_analysis": "🙋",
+        }
+        for k, v in st.session_state.results.items():
+            icon = icons.get(k, "✅")
+            st.markdown(f"{icon} {v['label']}")
     else:
-        st.write("아직 생성된 결과물이 없습니다.")
+        st.markdown("_아직 생성된 결과물이 없습니다._")
 
 
 tabs = st.tabs(
     [
-        "1. 홈",
-        "2. 상황 기반 그림책 추천",
-        "3. vFlat SCAN 자료화",
-        "4. 질문 10개 만들기",
-        "5. 질문 중심 지도안 만들기",
-        "6. 학생 질문 수업화",
-        "7. 내보내기",
+        "🏠 홈",
+        "📖 그림책 추천",
+        "🔍 SCAN 자료화",
+        "❓ 질문 10개",
+        "📋 지도안 만들기",
+        "🙋 학생 질문 수업화",
+        "💾 내보내기",
     ]
 )
 
 with tabs[0]:
-    st.title("그림책 질문수업 코파일럿")
     st.markdown(
-        "교사가 수업 상황 또는 vFlat SCAN OCR 텍스트를 입력하면 그림책 추천, 질문 10개, 질문 중심 지도안, "
-        "학생 활동지와 마음성장노트형 성찰 질문지를 만드는 웹앱 MVP입니다."
+        """
+<div class="hero-banner">
+  <h1>📚 그림책 질문수업 코파일럿</h1>
+  <p>교사가 수업 상황 또는 vFlat SCAN OCR 텍스트를 입력하면<br>
+  그림책 추천 · 질문 10개 · 질문 중심 지도안 · 학생 활동지 · 마음성장노트를 바로 만들어 드려요!</p>
+</div>
+""",
+        unsafe_allow_html=True,
     )
 
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(
             """
-<div class="card"><h4>① 그림책을 수업 매개로</h4>
-<p>그림책을 독서 자료에만 머물게 하지 않고 자존감, 다름, 친구 관계, 가족, 환경, 인권 등 삶의 주제로 연결합니다.</p></div>
-""",
+<div class="card card-pink">
+  <h4>🌱 그림책을 수업 매개로</h4>
+  <p>그림책을 독서 자료에만 머물게 하지 않고 자존감, 다름, 친구 관계, 가족, 환경, 인권 등 <b>삶의 주제</b>로 연결합니다.</p>
+</div>""",
             unsafe_allow_html=True,
         )
     with c2:
         st.markdown(
             """
-<div class="card"><h4>② 질문 중심 하브루타</h4>
-<p>책 낭독 → 감상 나누기 → 질문 만들기 → 짝 토론하기 → 나만의 생각 쓰기 흐름을 기본으로 삼습니다.</p></div>
-""",
+<div class="card card-purple">
+  <h4>💬 질문 중심 하브루타</h4>
+  <p>책 낭독 → 감상 나누기 → 질문 만들기 → 짝 토론하기 → 나만의 생각 쓰기 흐름을 기본으로 삼습니다.</p>
+</div>""",
             unsafe_allow_html=True,
         )
     with c3:
         st.markdown(
             """
-<div class="card"><h4>③ 마음성장노트</h4>
-<p>학생을 진단하지 않고, 인물의 마음에서 출발해 나와 공동체의 실천으로 안전하게 확장합니다.</p></div>
-""",
+<div class="card card-blue">
+  <h4>💛 마음성장노트</h4>
+  <p>학생을 진단하지 않고, 인물의 마음에서 출발해 나와 공동체의 실천으로 <b>안전하게 확장</b>합니다.</p>
+</div>""",
             unsafe_allow_html=True,
         )
 
-    st.markdown("### 사용 흐름")
-    st.write("상황 입력 → 그림책 추천 → OCR 자료화 → 질문 10개 → 지도안 → 학생 질문 수업화 → Markdown/DOCX 내보내기")
+    st.markdown(
+        """
+<div class="section-header"><span>🗺️ 사용 흐름</span></div>
+<div class="flow-row">
+  <span class="flow-badge">📝 상황 입력</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-badge">📖 그림책 추천</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-badge">🔍 OCR 자료화</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-badge">❓ 질문 10개</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-badge">📋 지도안</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-badge">🙋 학생 질문 수업화</span>
+  <span class="flow-arrow">→</span>
+  <span class="flow-badge">💾 내보내기</span>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("### 내장 그림책 DB 미리보기")
+    st.markdown('<div class="section-header"><span>📚 내장 그림책 DB 미리보기</span></div>', unsafe_allow_html=True)
     st.dataframe(pd.DataFrame(catalog_to_dataframe_records()), use_container_width=True)
 
     methodology = load_methodology()
-    with st.expander("수업 원리 요약 보기"):
+    with st.expander("📖 수업 원리 요약 보기"):
         st.json(methodology)
 
 with tabs[1]:
-    st.header("상황 기반 그림책 추천")
+    st.markdown('<div class="section-header"><span>📖 상황 기반 그림책 추천</span></div>', unsafe_allow_html=True)
     st.markdown("교사의 수업 상황을 입력하면 내부 DB를 먼저 점수화하고, API가 있으면 추천 설명을 보완합니다.")
 
     col1, col2 = st.columns(2)
@@ -212,7 +511,7 @@ with tabs[1]:
             key="recommend_activity_style",
         )
 
-    if st.button("그림책 추천하기", type="primary", key="recommend_button"):
+    if st.button("📖 그림책 추천하기", type="primary", key="recommend_button"):
         results = recommend_picturebooks(
             cached_catalog(),
             grade=grade,
@@ -233,7 +532,7 @@ with tabs[1]:
                 st.write(r["그림책 제목"], r["점수 세부"])
 
 with tabs[2]:
-    st.header("vFlat SCAN 자료화")
+    st.markdown('<div class="section-header"><span>🔍 vFlat SCAN 자료화</span></div>', unsafe_allow_html=True)
     st.markdown("PDF/TXT는 텍스트를 추출하고, 이미지 파일은 vFlat OCR 텍스트 붙여넣기를 기본으로 사용합니다.")
     st.markdown(f"<div class='warning-box'>{SAFETY_NOTICE}</div>", unsafe_allow_html=True)
 
@@ -250,7 +549,7 @@ with tabs[2]:
         key="scan_ocr_text",
     )
 
-    if st.button("자료화하기", type="primary", key="scan_material_button"):
+    if st.button("🔍 자료화하기", type="primary", key="scan_material_button"):
         file_text = extract_text_from_upload(uploaded)
         combined_text = "\n".join([file_text, pasted_ocr]).strip()
         material = generate_scan_material(scan_title, combined_text)
@@ -259,7 +558,7 @@ with tabs[2]:
         show_json_like(material)
 
 with tabs[3]:
-    st.header("그림책 흐름에 따른 질문 10개 만들기")
+    st.markdown('<div class="section-header"><span>❓ 그림책 흐름에 따른 질문 10개 만들기</span></div>', unsafe_allow_html=True)
     titles = ["직접 입력"] + cached_titles()
     selected = st.selectbox("그림책 선택 또는 직접 입력", titles, key="question_book_selector")
 
@@ -286,7 +585,7 @@ with tabs[3]:
     )
     q_topic = st.text_input("수업 주제", value="다름과 자기수용", key="question_topic")
 
-    if st.button("질문 10개 생성", type="primary", key="question_generate_button"):
+    if st.button("❓ 질문 10개 생성", type="primary", key="question_generate_button"):
         cards = generate_question_cards(q_title, q_summary, q_grade, q_topic)
         save_result("question_cards", "질문 10개 카드", q_title, cards)
         st.success("질문 10개를 생성했습니다.")
@@ -295,7 +594,7 @@ with tabs[3]:
         question_cards_view(cards)
 
 with tabs[4]:
-    st.header("질문 중심수업 지도안 만들기")
+    st.markdown('<div class="section-header"><span>📋 질문 중심수업 지도안 만들기</span></div>', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
 
     with col1:
@@ -322,7 +621,7 @@ with tabs[4]:
             )
         lp_questions = st.text_area("질문 목록", value=existing_questions, height=180, key="lesson_questions_text")
 
-    if st.button("지도안 생성", type="primary", key="lesson_generate_button"):
+    if st.button("📋 지도안 생성", type="primary", key="lesson_generate_button"):
         plan = generate_lesson_plan(lp_title, lp_grade, lp_subject, lp_minutes, lp_idea, lp_questions)
         save_result("lesson_plan", "질문 중심수업 지도안", lp_title, plan)
 
@@ -341,7 +640,7 @@ with tabs[4]:
             st.markdown(worksheet)
 
 with tabs[5]:
-    st.header("학생 질문 수업화")
+    st.markdown('<div class="section-header"><span>🙋 학생 질문 수업화</span></div>', unsafe_allow_html=True)
     st.markdown("학생 이름과 개인 정보를 지운 뒤 붙여넣어 주세요. 예시는 학생 A, 학생 B처럼 익명화합니다.")
 
     sample_questions = """주인공은 왜 혼자 있었을까?
@@ -357,7 +656,7 @@ with tabs[5]:
         key="student_question_text",
     )
 
-    if st.button("질문 분류 및 수업화", type="primary", key="student_question_analyze_button"):
+    if st.button("🙋 질문 분류 및 수업화", type="primary", key="student_question_analyze_button"):
         analysis = analyze_student_questions(student_qs)
         save_result("student_question_analysis", "학생 질문 수업화 결과", "학생 질문", analysis)
 
@@ -377,7 +676,7 @@ with tabs[5]:
             st.dataframe(pd.DataFrame(analysis["safe_rewrites"]), use_container_width=True)
 
 with tabs[6]:
-    st.header("내보내기")
+    st.markdown('<div class="section-header"><span>💾 내보내기</span></div>', unsafe_allow_html=True)
 
     if not st.session_state.results:
         st.info("먼저 다른 탭에서 결과물을 생성해 주세요.")
@@ -404,7 +703,7 @@ with tabs[6]:
         docx_filename = dated_filename(selected_result["title"], selected_key, "docx")
 
         st.download_button(
-            "Markdown 다운로드",
+            "📄 Markdown 다운로드",
             data=md_text.encode("utf-8"),
             file_name=md_filename,
             mime="text/markdown",
@@ -414,7 +713,7 @@ with tabs[6]:
         try:
             docx_bytes = markdown_to_docx_bytes(md_text)
             st.download_button(
-                "DOCX 다운로드",
+                "📝 DOCX 다운로드",
                 data=docx_bytes,
                 file_name=docx_filename,
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
