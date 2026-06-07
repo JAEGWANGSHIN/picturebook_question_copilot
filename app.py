@@ -57,19 +57,26 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 [data-testid="stSidebar"] .stMarkdown p,
 [data-testid="stSidebar"] .stMarkdown li {
-    color: #ffe4f5 !important;
+    color: rgba(255,255,255,0.92) !important;
     font-size: 0.88rem;
 }
 [data-testid="stSidebar"] h1 {
     font-family: 'Jua', sans-serif !important;
-    font-size: 1.4rem !important;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    font-size: 1.5rem !important;
+    font-weight: 900 !important;
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.3), 0 0 20px rgba(255,255,255,0.2) !important;
+    letter-spacing: -0.3px;
 }
 [data-testid="stSidebar"] h3 {
     font-family: 'Jua', sans-serif !important;
-    border-bottom: 2px solid rgba(255,255,255,0.3);
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
+    border-bottom: 2px solid rgba(255,255,255,0.4);
     padding-bottom: 6px;
     margin-top: 20px !important;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.2);
 }
 [data-testid="stSidebar"] [data-testid="stInfo"] {
     background: rgba(255,255,255,0.15) !important;
@@ -81,20 +88,28 @@ html, body, [data-testid="stAppViewContainer"] {
 /* ── 탭 스타일 ── */
 [data-testid="stTabs"] [role="tablist"] {
     background: rgba(255,255,255,0.7);
-    border-radius: 20px;
-    padding: 4px 6px;
-    gap: 4px;
+    border-radius: 16px;
+    padding: 3px 4px;
+    gap: 2px;
     backdrop-filter: blur(8px);
     box-shadow: 0 2px 12px rgba(255,107,157,0.15);
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    scrollbar-width: none;
+}
+[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar {
+    display: none;
 }
 [data-testid="stTabs"] [role="tab"] {
-    border-radius: 14px !important;
+    border-radius: 12px !important;
     font-family: 'Nanum Gothic', sans-serif !important;
     font-weight: 700 !important;
-    font-size: 0.82rem !important;
-    padding: 6px 14px !important;
+    font-size: 0.72rem !important;
+    padding: 5px 9px !important;
     transition: all 0.2s !important;
     color: #666 !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
 }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
     background: linear-gradient(135deg, #ff6b9d, #c44ddb) !important;
@@ -102,8 +117,8 @@ html, body, [data-testid="stAppViewContainer"] {
     box-shadow: 0 3px 10px rgba(255,107,157,0.4) !important;
 }
 
-/* ── 페이지 타이틀 ── */
-h1 {
+/* ── 페이지 타이틀 (메인 영역만) ── */
+[data-testid="stMainBlockContainer"] h1 {
     font-family: 'Jua', sans-serif !important;
     background: linear-gradient(135deg, #ff6b9d, #7c4dff);
     -webkit-background-clip: text;
@@ -111,7 +126,8 @@ h1 {
     background-clip: text;
     font-size: 2.2rem !important;
 }
-h2, h3 {
+[data-testid="stMainBlockContainer"] h2,
+[data-testid="stMainBlockContainer"] h3 {
     font-family: 'Jua', sans-serif !important;
     color: #5c3d8f !important;
 }
