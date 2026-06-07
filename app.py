@@ -422,4 +422,3 @@ with tabs[6]:
             )
         except Exception as exc:
             st.warning(f"DOCX 생성 중 오류가 발생했습니다. Markdown 다운로드를 사용해 주세요. 오류: {exc}")
-```
