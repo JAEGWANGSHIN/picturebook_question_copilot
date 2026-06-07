@@ -504,115 +504,114 @@ with tabs[0]:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="section-header"><span>📚 내장 그림책 DB 미리보기</span></div>', unsafe_allow_html=True)
-
     catalog_all = cached_catalog()
-    grade_options = ["전체 학년"] + [
-        "1-2학년", "3-4학년", "5-6학년"
-    ]
-    filter_col1, filter_col2 = st.columns([2, 3])
-    with filter_col1:
-        selected_grade_filter = st.selectbox(
-            "학년으로 필터",
-            grade_options,
-            key="db_grade_filter",
+
+    with st.expander(f"📚 내장 그림책 DB 미리보기  ({len(catalog_all)}권)"):
+
+        grade_options = ["전체 학년", "1-2학년", "3-4학년", "5-6학년"]
+        filter_col1, filter_col2 = st.columns([2, 3])
+        with filter_col1:
+            selected_grade_filter = st.selectbox(
+                "학년으로 필터",
+                grade_options,
+                key="db_grade_filter",
+            )
+        with filter_col2:
+            search_keyword = st.text_input(
+                "주제·키워드 검색",
+                placeholder="예: 자존감, 두려움, 친구 관계 …",
+                key="db_keyword_search",
+            )
+
+        def grade_matches(band: str, sel: str) -> bool:
+            if sel == "전체 학년":
+                return True
+            nums = [int(x) for x in __import__("re").findall(r"[1-6]", band)]
+            if not nums:
+                return True
+            low, high = min(nums), max(nums)
+            if sel == "1-2학년":
+                return low <= 2
+            if sel == "3-4학년":
+                return low <= 4 and high >= 3
+            if sel == "5-6학년":
+                return high >= 5
+            return True
+
+        def keyword_matches(book: dict, kw: str) -> bool:
+            if not kw.strip():
+                return True
+            kw_lower = kw.strip().lower()
+            searchable = (
+                " ".join(book.get("main_themes", []))
+                + " ".join(book.get("emotion_keywords", []))
+                + book.get("story_summary", "")
+                + book.get("title", "")
+            ).lower()
+            return kw_lower in searchable
+
+        filtered = [
+            b for b in catalog_all
+            if grade_matches(b.get("recommended_grade_band", ""), selected_grade_filter)
+            and keyword_matches(b, search_keyword)
+        ]
+
+        st.markdown(
+            f"<p style='color:#888;font-size:0.88rem;margin:4px 0 12px;'>"
+            f"총 <b style='color:#c44ddb'>{len(catalog_all)}권</b> 중 "
+            f"<b style='color:#ff6b9d'>{len(filtered)}권</b> 표시 중</p>",
+            unsafe_allow_html=True,
         )
-    with filter_col2:
-        search_keyword = st.text_input(
-            "주제·키워드 검색",
-            placeholder="예: 자존감, 두려움, 친구 관계 …",
-            key="db_keyword_search",
-        )
 
-    def grade_matches(band: str, sel: str) -> bool:
-        if sel == "전체 학년":
-            return True
-        nums = [int(x) for x in __import__("re").findall(r"[1-6]", band)]
-        if not nums:
-            return True
-        low, high = min(nums), max(nums)
-        if sel == "1-2학년":
-            return low <= 2
-        if sel == "3-4학년":
-            return low <= 4 and high >= 3
-        if sel == "5-6학년":
-            return high >= 5
-        return True
+        GRADE_COLOR = {
+            "1": "#4db8ff", "2": "#4db8ff",
+            "3": "#ff9f43", "4": "#ff9f43",
+            "5": "#c44ddb", "6": "#c44ddb",
+        }
 
-    def keyword_matches(book: dict, kw: str) -> bool:
-        if not kw.strip():
-            return True
-        kw_lower = kw.strip().lower()
-        searchable = (
-            " ".join(book.get("main_themes", []))
-            + " ".join(book.get("emotion_keywords", []))
-            + book.get("story_summary", "")
-            + book.get("title", "")
-        ).lower()
-        return kw_lower in searchable
+        for book in filtered:
+            band = book.get("recommended_grade_band", "")
+            first_grade = __import__("re").search(r"[1-6]", band)
+            badge_color = GRADE_COLOR.get(first_grade.group() if first_grade else "1", "#888")
+            themes = " · ".join(book.get("main_themes", [])[:4])
+            emotions = " · ".join(book.get("emotion_keywords", [])[:4])
+            hooks = book.get("question_hooks", [])
+            activities = book.get("lesson_activity_ideas", [])
+            cautions = book.get("cautions", [])
 
-    filtered = [
-        b for b in catalog_all
-        if grade_matches(b.get("recommended_grade_band", ""), selected_grade_filter)
-        and keyword_matches(b, search_keyword)
-    ]
-
-    st.markdown(
-        f"<p style='color:#888;font-size:0.88rem;margin:4px 0 12px;'>"
-        f"총 <b style='color:#c44ddb'>{len(catalog_all)}권</b> 중 "
-        f"<b style='color:#ff6b9d'>{len(filtered)}권</b> 표시 중</p>",
-        unsafe_allow_html=True,
-    )
-
-    GRADE_COLOR = {
-        "1": "#4db8ff", "2": "#4db8ff",
-        "3": "#ff9f43", "4": "#ff9f43",
-        "5": "#c44ddb", "6": "#c44ddb",
-    }
-
-    for book in filtered:
-        band = book.get("recommended_grade_band", "")
-        first_grade = __import__("re").search(r"[1-6]", band)
-        badge_color = GRADE_COLOR.get(first_grade.group() if first_grade else "1", "#888")
-        themes = " · ".join(book.get("main_themes", [])[:4])
-        emotions = " · ".join(book.get("emotion_keywords", [])[:4])
-        hooks = book.get("question_hooks", [])
-        activities = book.get("lesson_activity_ideas", [])
-        cautions = book.get("cautions", [])
-
-        label = f"📗 {book.get('title', '')}  |  {band}  |  {themes}"
-        with st.expander(label):
-            c_left, c_right = st.columns(2)
-            with c_left:
-                st.markdown(
-                    f"<span style='background:{badge_color};color:#fff;"
-                    f"border-radius:8px;padding:2px 10px;font-size:0.8rem;"
-                    f"font-weight:700;'>{band}</span>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(f"**✍️ 저자** {book.get('author','확인 필요')} / **출판사** {book.get('publisher','확인 필요')}")
-                st.markdown(f"**📌 핵심 주제** {themes}")
-                st.markdown(f"**💛 정서 키워드** {emotions}")
-                st.markdown(f"**📖 줄거리** {book.get('story_summary','')}")
-                if book.get("curriculum_links"):
-                    st.markdown("**🔗 교과 연계** " + " / ".join(book["curriculum_links"]))
-            with c_right:
-                if hooks:
-                    st.markdown("**❓ 핵심 질문**")
-                    for q in hooks:
-                        st.markdown(f"- {q}")
-                if activities:
-                    st.markdown("**🎨 수업 활동 아이디어**")
-                    for a in activities:
-                        st.markdown(f"- {a}")
-                if cautions:
-                    st.markdown("**⚠️ 유의점**")
-                    for cau in cautions:
-                        st.markdown(
-                            f"<div class='warning-box' style='padding:8px 12px;margin:4px 0;'>"
-                            f"{cau}</div>",
-                            unsafe_allow_html=True,
-                        )
+            label = f"📗 {book.get('title', '')}  |  {band}  |  {themes}"
+            with st.expander(label):
+                c_left, c_right = st.columns(2)
+                with c_left:
+                    st.markdown(
+                        f"<span style='background:{badge_color};color:#fff;"
+                        f"border-radius:8px;padding:2px 10px;font-size:0.8rem;"
+                        f"font-weight:700;'>{band}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(f"**✍️ 저자** {book.get('author','확인 필요')} / **출판사** {book.get('publisher','확인 필요')}")
+                    st.markdown(f"**📌 핵심 주제** {themes}")
+                    st.markdown(f"**💛 정서 키워드** {emotions}")
+                    st.markdown(f"**📖 줄거리** {book.get('story_summary','')}")
+                    if book.get("curriculum_links"):
+                        st.markdown("**🔗 교과 연계** " + " / ".join(book["curriculum_links"]))
+                with c_right:
+                    if hooks:
+                        st.markdown("**❓ 핵심 질문**")
+                        for q in hooks:
+                            st.markdown(f"- {q}")
+                    if activities:
+                        st.markdown("**🎨 수업 활동 아이디어**")
+                        for a in activities:
+                            st.markdown(f"- {a}")
+                    if cautions:
+                        st.markdown("**⚠️ 유의점**")
+                        for cau in cautions:
+                            st.markdown(
+                                f"<div class='warning-box' style='padding:8px 12px;margin:4px 0;'>"
+                                f"{cau}</div>",
+                                unsafe_allow_html=True,
+                            )
 
     methodology = load_methodology()
     with st.expander("📖 수업 원리 요약 보기"):
