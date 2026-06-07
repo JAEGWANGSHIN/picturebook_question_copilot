@@ -319,9 +319,26 @@ html, body, [data-testid="stAppViewContainer"] {
     box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
 }
 
-/* ── 메인 영역 패딩 ── */
+/* ── Streamlit 상단 툴바 숨김 & 레이아웃 보정 ── */
+[data-testid="stHeader"] {
+    display: none !important;
+}
+#MainMenu { display: none !important; }
+footer { display: none !important; }
+
+/* 메인 컨테이너 여백 */
 [data-testid="stMainBlockContainer"] {
-    padding-top: 24px !important;
+    padding-top: 16px !important;
+    padding-bottom: 32px !important;
+}
+
+/* 탭 바 위 잘림 방지 */
+[data-testid="stTabs"] {
+    margin-top: 0 !important;
+}
+[data-testid="stTabs"] > div:first-child {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
 }
 </style>
 """
