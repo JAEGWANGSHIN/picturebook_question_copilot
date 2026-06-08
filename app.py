@@ -672,29 +672,76 @@ with tabs[1]:
 
 with tabs[2]:
     st.markdown('<div class="section-header"><span>🔍 vFlat SCAN 자료화</span></div>', unsafe_allow_html=True)
-    st.markdown("PDF/TXT는 텍스트를 추출하고, 이미지 파일은 vFlat OCR 텍스트 붙여넣기를 기본으로 사용합니다.")
+    st.markdown(
+        "PDF·이미지를 업로드하면 **자동으로 텍스트를 추출**하고, 그림책 수업 자료로 변환합니다. "
+        "ANTHROPIC_API_KEY가 설정되어 있으면 스캔 PDF·이미지도 Vision OCR로 자동 처리됩니다."
+    )
     st.markdown(f"<div class='warning-box'>{SAFETY_NOTICE}</div>", unsafe_allow_html=True)
 
     uploaded = st.file_uploader(
-        "PDF/JPG/PNG/TXT 업로드",
+        "📁 PDF / JPG / PNG / TXT 업로드",
         type=["pdf", "jpg", "jpeg", "png", "txt", "md"],
         key="scan_file_uploader",
     )
-    scan_title = st.text_input("그림책 제목 입력", value="", key="scan_title_input")
+    scan_title = st.text_input("📖 그림책 제목 입력", value="", key="scan_title_input")
+
+    # ── 자동 OCR: 파일이 바뀔 때마다 추출 ──
+    ocr_key = f"_ocr_cache_{uploaded.name if uploaded else 'none'}"
+    if uploaded and ocr_key not in st.session_state:
+        with st.spinner("📄 텍스트 추출 중…"):
+            extracted, status_msg = extract_text_from_upload(uploaded)
+            st.session_state[ocr_key] = (extracted, status_msg)
+    elif not uploaded:
+        extracted, status_msg = "", ""
+    else:
+        extracted, status_msg = st.session_state.get(ocr_key, ("", ""))
+
+    # 상태 메시지
+    if status_msg:
+        if status_msg.startswith("✅"):
+            st.success(status_msg)
+        else:
+            st.warning(status_msg)
+
+    # 추출된 텍스트 미리보기 (접기/펼치기)
+    if extracted and not extracted.startswith("⚠️"):
+        with st.expander("📄 추출된 텍스트 미리보기 (편집 가능)", expanded=False):
+            extracted = st.text_area(
+                "추출된 원문 (수정 가능)",
+                value=extracted,
+                height=260,
+                key="scan_extracted_preview",
+                label_visibility="collapsed",
+            )
+
+    # 직접 붙여넣기 (보완용)
     pasted_ocr = st.text_area(
-        "OCR 텍스트 붙여넣기",
-        height=220,
-        placeholder="vFlat SCAN에서 추출한 OCR 텍스트를 여기에 붙여넣으세요.",
+        "✏️ OCR 텍스트 직접 붙여넣기 (보완 또는 대체)",
+        height=160,
+        placeholder="vFlat SCAN 등에서 추출한 텍스트를 여기에 붙여넣으면 자동 추출 내용과 합쳐집니다.",
         key="scan_ocr_text",
     )
 
-    if st.button("🔍 자료화하기", type="primary", key="scan_material_button"):
-        file_text = extract_text_from_upload(uploaded)
-        combined_text = "\n".join([file_text, pasted_ocr]).strip()
-        material = generate_scan_material(scan_title, combined_text)
-        save_result("scan_material", "vFlat SCAN 자료화 결과", scan_title or "스캔 자료", material)
-        st.success("수업 자료화 결과를 생성했습니다.")
-        show_json_like(material)
+    col_btn, col_hint = st.columns([2, 5])
+    with col_btn:
+        run_scan = st.button("🔍 자료화하기", type="primary", key="scan_material_button")
+    with col_hint:
+        st.markdown(
+            "<p style='color:#aaa;font-size:0.82rem;padding-top:10px;'>"
+            "업로드 텍스트 + 직접 입력 텍스트를 합쳐서 분석합니다.</p>",
+            unsafe_allow_html=True,
+        )
+
+    if run_scan:
+        combined_text = "\n".join([extracted or "", pasted_ocr or ""]).strip()
+        if not combined_text:
+            st.warning("텍스트가 없습니다. 파일을 업로드하거나 OCR 텍스트를 붙여넣어 주세요.")
+        else:
+            with st.spinner("📝 수업 자료 생성 중…"):
+                material = generate_scan_material(scan_title, combined_text)
+            save_result("scan_material", "vFlat SCAN 자료화 결과", scan_title or "스캔 자료", material)
+            st.success("✅ 수업 자료화 결과를 생성했습니다.")
+            show_json_like(material)
 
 with tabs[3]:
     st.markdown('<div class="section-header"><span>❓ 그림책 흐름에 따른 질문 10개 만들기</span></div>', unsafe_allow_html=True)
