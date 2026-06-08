@@ -162,8 +162,9 @@ def search_picturebooks_online(
     import json
     from openai import OpenAI
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    from .llm_client import _get_secret
+    api_key = _get_secret("OPENAI_API_KEY")
+    model = _get_secret("OPENAI_MODEL") or "gpt-4o-mini"
     client = OpenAI(api_key=api_key)
 
     query_prompt = (
