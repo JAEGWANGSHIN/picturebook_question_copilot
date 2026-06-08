@@ -12,6 +12,7 @@ from modules.lesson_generator import generate_lesson_plan, generate_question_car
 from modules.pdf_utils import extract_text_from_upload
 from modules.question_analyzer import analyze_student_questions
 from modules.recommendation import recommend_picturebooks
+from modules.llm_client import is_mock_mode
 
 st.set_page_config(
     page_title="그림책 질문수업 코파일럿",
@@ -619,7 +620,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.markdown('<div class="section-header"><span>📖 상황 기반 그림책 추천</span></div>', unsafe_allow_html=True)
-    st.markdown("교사의 수업 상황을 입력하면 내부 DB를 먼저 점수화하고, API가 있으면 추천 설명을 보완합니다.")
+    st.markdown("교사의 수업 상황을 입력하면 **내부 DB 추천**과 **인터넷 검색 추천**을 함께 제공합니다.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -651,24 +652,69 @@ with tabs[1]:
         )
 
     if st.button("📖 그림책 추천하기", type="primary", key="recommend_button"):
-        results = recommend_picturebooks(
-            cached_catalog(),
-            grade=grade,
-            subject=subject,
-            achievement=achievement,
-            topic=topic,
-            class_context=class_context,
-            lesson_minutes=lesson_minutes,
-            activity_style=", ".join(activity_style),
-            top_n=5,
-        )
-        save_result("recommendations", "그림책 추천표", topic, results)
-        st.success("추천 결과를 생성했습니다.")
-        st.dataframe(pd.DataFrame(results).drop(columns=["점수 세부", "LLM 보완 메모"], errors="ignore"), use_container_width=True)
 
-        with st.expander("점수 세부 보기"):
-            for r in results:
-                st.write(r["그림책 제목"], r["점수 세부"])
+        activity_str = ", ".join(activity_style)
+
+        # ── ① 내부 DB 추천 ──
+        with st.spinner("📚 내부 DB에서 추천 중…"):
+            db_results = recommend_picturebooks(
+                cached_catalog(),
+                grade=grade,
+                subject=subject,
+                achievement=achievement,
+                topic=topic,
+                class_context=class_context,
+                lesson_minutes=lesson_minutes,
+                activity_style=activity_str,
+                top_n=5,
+            )
+
+        st.markdown('<div class="section-header"><span>📚 내부 DB 추천 결과</span></div>', unsafe_allow_html=True)
+        for i, r in enumerate(db_results):
+            with st.expander(f"{'⭐' if i == 0 else '📗'} {r['그림책 제목']}  |  {r['적합 학년']}  |  점수 {r['추천 점수']}점"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown(f"**📌 핵심 주제** {r['핵심 주제']}")
+                    st.markdown(f"**💛 정서 키워드** {r['정서 키워드']}")
+                    st.markdown(f"**💬 추천 이유** {r['추천 이유']}")
+                    st.markdown(f"**📋 수업 가능성** {r['질문 중심수업 가능성']}")
+                with c2:
+                    st.markdown(f"**❓ 핵심 질문** {r['핵심 질문 1개']}")
+                    st.markdown(f"**🎨 활동 아이디어** {r['수업 활동 아이디어']}")
+                    st.markdown(f"**⚠️ 유의점** {r['유의점']}")
+
+        save_result("recommendations", "그림책 추천표", topic, db_results)
+
+        # ── ② 인터넷 검색 추천 ──
+        from modules.recommendation import search_picturebooks_online
+        st.markdown('<div class="section-header"><span>🌐 인터넷 검색 추천 결과</span></div>', unsafe_allow_html=True)
+
+        if is_mock_mode():
+            st.info("💡 OPENAI_API_KEY를 설정하면 인터넷에서 추가 그림책을 검색합니다.")
+        else:
+            with st.spinner("🌐 인터넷에서 그림책 검색 중… (10~20초 소요)"):
+                web_results = search_picturebooks_online(
+                    grade=grade,
+                    topic=topic,
+                    class_context=class_context,
+                    activity_style=activity_str,
+                )
+
+            if web_results and "오류" not in web_results[0].get("그림책 제목", ""):
+                for r in web_results:
+                    naver_url = f"https://search.naver.com/search.naver?query={r.get('구매 검색어', r['그림책 제목'])}+그림책"
+                    with st.expander(f"🌐 {r['그림책 제목']}  |  {r.get('저자','확인 필요')}  |  {r.get('출판사','확인 필요')}"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.markdown(f"**🎓 적합 학년** {r.get('적합 학년','')}")
+                            st.markdown(f"**📌 핵심 주제** {r.get('핵심 주제','')}")
+                            st.markdown(f"**💬 추천 이유** {r.get('추천 이유','')}")
+                        with c2:
+                            st.markdown(f"**❓ 핵심 질문** {r.get('핵심 질문','')}")
+                            st.markdown(f"**🎨 수업 활동** {r.get('수업 활동','')}")
+                            st.markdown(f"[🔍 네이버에서 검색]({naver_url})", unsafe_allow_html=False)
+            else:
+                st.warning("인터넷 검색 결과를 가져오지 못했습니다. API 키와 모델을 확인해 주세요.")
 
 with tabs[2]:
     st.markdown('<div class="section-header"><span>🔍 vFlat SCAN 자료화</span></div>', unsafe_allow_html=True)
