@@ -674,7 +674,7 @@ with tabs[2]:
     st.markdown('<div class="section-header"><span>🔍 vFlat SCAN 자료화</span></div>', unsafe_allow_html=True)
     st.markdown(
         "PDF·이미지를 업로드하면 **자동으로 텍스트를 추출**하고, 그림책 수업 자료로 변환합니다. "
-        "ANTHROPIC_API_KEY가 설정되어 있으면 스캔 PDF·이미지도 Vision OCR로 자동 처리됩니다."
+        "OPENAI_API_KEY가 설정되어 있으면 스캔 PDF·이미지도 Vision OCR로 자동 처리됩니다."
     )
     st.markdown(f"<div class='warning-box'>{SAFETY_NOTICE}</div>", unsafe_allow_html=True)
 
