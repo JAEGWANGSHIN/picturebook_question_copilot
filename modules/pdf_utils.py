@@ -73,7 +73,8 @@ def _vision_ocr(image_bytes: bytes, media_type: str = "image/png") -> str:
     import os
     from openai import OpenAI
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    from modules.llm_client import _get_secret
+    api_key = _get_secret("OPENAI_API_KEY")
     if not api_key:
         return ""
 
@@ -82,7 +83,7 @@ def _vision_ocr(image_bytes: bytes, media_type: str = "image/png") -> str:
 
     try:
         response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            model=_get_secret("OPENAI_MODEL") or "gpt-4o-mini",
             max_tokens=4096,
             messages=[
                 {
@@ -112,8 +113,8 @@ def _vision_ocr(image_bytes: bytes, media_type: str = "image/png") -> str:
 
 
 def _has_vision_api() -> bool:
-    import os
-    return bool(os.getenv("OPENAI_API_KEY"))
+    from modules.llm_client import _get_secret
+    return bool(_get_secret("OPENAI_API_KEY"))
 
 
 # ── 공개 인터페이스 ──────────────────────────────────────────────────────
