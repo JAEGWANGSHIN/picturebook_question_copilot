@@ -141,3 +141,90 @@ def recommend_picturebooks(
             }
         )
     return results
+
+
+# ── 인터넷 검색 기반 그림책 추천 ─────────────────────────────────────────
+
+def search_picturebooks_online(
+    grade: str,
+    topic: str,
+    class_context: str,
+    activity_style: str,
+) -> list[dict[str, Any]]:
+    """
+    OpenAI의 web_search 도구를 활용해 인터넷에서 그림책을 검색·추천합니다.
+    API 키가 없으면 빈 리스트를 반환합니다.
+    """
+    if is_mock_mode():
+        return []
+
+    import os
+    import json
+    from openai import OpenAI
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    client = OpenAI(api_key=api_key)
+
+    query_prompt = (
+        f"초등학교 {grade} 학생을 위한 그림책을 추천해줘. "
+        f"수업 주제: {topic}. "
+        f"학급 상황: {class_context}. "
+        f"활동 방식: {activity_style}. "
+        "내부 DB에 없는 다양한 그림책 5권을 인터넷에서 검색해서 추천해줘. "
+        "반드시 다음 JSON 배열 형식으로만 답해줘. 다른 설명 없이 JSON만 출력해:\n"
+        '[{"그림책 제목":"제목","저자":"저자명","출판사":"출판사명","적합 학년":"학년","핵심 주제":"주제1, 주제2","추천 이유":"이유","핵심 질문":"질문","수업 활동":"활동 아이디어","구매 링크 키워드":"검색어"}]'
+    )
+
+    try:
+        # web_search 도구를 사용해 검색
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=2000,
+            tools=[{"type": "web_search_preview"}],
+            tool_choice="auto",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 초등 교사를 위한 그림책 전문가입니다. "
+                        "웹을 검색해서 수업 주제에 맞는 실제 존재하는 그림책을 추천하세요. "
+                        "반드시 JSON 배열만 출력하고 다른 텍스트는 넣지 마세요."
+                    ),
+                },
+                {"role": "user", "content": query_prompt},
+            ],
+        )
+
+        raw = response.choices[0].message.content or ""
+
+        # JSON 파싱
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        books = json.loads(raw)
+        if not isinstance(books, list):
+            books = [books]
+
+        results = []
+        for b in books:
+            results.append({
+                "그림책 제목": b.get("그림책 제목", ""),
+                "저자": b.get("저자", "확인 필요"),
+                "출판사": b.get("출판사", "확인 필요"),
+                "적합 학년": b.get("적합 학년", grade),
+                "핵심 주제": b.get("핵심 주제", ""),
+                "추천 이유": b.get("추천 이유", ""),
+                "핵심 질문": b.get("핵심 질문", ""),
+                "수업 활동": b.get("수업 활동", ""),
+                "추천 근거": "🌐 인터넷 검색",
+                "구매 검색어": b.get("구매 링크 키워드", b.get("그림책 제목", "")),
+            })
+        return results
+
+    except Exception as exc:
+        return [{"그림책 제목": f"[검색 오류: {exc}]", "추천 근거": "오류"}]
