@@ -66,34 +66,32 @@ def _pdf_to_images(file_bytes: bytes, max_pages: int = 6) -> list[bytes]:
         return []
 
 
-# ── Claude Vision OCR ────────────────────────────────────────────────────
+# ── OpenAI Vision OCR ────────────────────────────────────────────────────
 
 def _vision_ocr(image_bytes: bytes, media_type: str = "image/png") -> str:
-    """Claude Vision API로 이미지에서 텍스트를 추출합니다."""
+    """OpenAI Vision API로 이미지에서 텍스트를 추출합니다."""
     import os
-    import anthropic
+    from openai import OpenAI
 
-    api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return ""
 
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    client = anthropic.Anthropic(api_key=api_key)
+    client = OpenAI(api_key=api_key)
 
     try:
-        response = client.messages.create(
-            model="claude-opus-4-5",
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             max_tokens=4096,
             messages=[
                 {
                     "role": "user",
                     "content": [
                         {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": b64,
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{b64}",
                             },
                         },
                         {
@@ -108,14 +106,14 @@ def _vision_ocr(image_bytes: bytes, media_type: str = "image/png") -> str:
                 }
             ],
         )
-        return response.content[0].text.strip() if response.content else ""
+        return response.choices[0].message.content.strip() if response.choices else ""
     except Exception as e:
         return f"[Vision OCR 오류: {e}]"
 
 
 def _has_vision_api() -> bool:
     import os
-    return bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))
+    return bool(os.getenv("OPENAI_API_KEY"))
 
 
 # ── 공개 인터페이스 ──────────────────────────────────────────────────────
@@ -179,7 +177,7 @@ def extract_text_from_upload(uploaded_file) -> tuple[str, str]:
             return "", "⚠️ PDF에서 텍스트를 추출하지 못했습니다. OCR 텍스트를 직접 붙여넣어 주세요."
         else:
             return "", (
-                "⚠️ 스캔 PDF입니다. ANTHROPIC_API_KEY를 설정하면 자동 OCR이 가능합니다. "
+                "⚠️ 스캔 PDF입니다. OPENAI_API_KEY를 설정하면 자동 OCR이 가능합니다. "
                 "지금은 OCR 텍스트를 직접 붙여넣어 주세요."
             )
 
@@ -194,7 +192,7 @@ def extract_text_from_upload(uploaded_file) -> tuple[str, str]:
                 return "", f"⚠️ OCR 결과가 없습니다. 이미지 품질을 확인하거나 텍스트를 직접 붙여넣어 주세요."
         else:
             return "", (
-                "⚠️ ANTHROPIC_API_KEY를 설정하면 이미지를 자동 OCR합니다. "
+                "⚠️ OPENAI_API_KEY를 설정하면 이미지를 자동 OCR합니다. "
                 "지금은 vFlat SCAN 등에서 추출한 텍스트를 직접 붙여넣어 주세요."
             )
 
