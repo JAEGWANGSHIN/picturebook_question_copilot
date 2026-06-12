@@ -1,3 +1,23 @@
+# ── pptxgenjs 자동 설치 (Streamlit Cloud 대응) ──────────────────
+import subprocess, sys, os
+
+def _ensure_pptxgenjs():
+    try:
+        result = subprocess.run(
+            ["node", "-e", "require('pptxgenjs')"],
+            capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return  # 이미 설치됨
+    except Exception:
+        pass
+    subprocess.run(["npm", "install", "-g", "pptxgenjs"], check=True, timeout=120)
+
+try:
+    _ensure_pptxgenjs()
+except Exception as e:
+    pass  # 설치 실패해도 앱은 실행 — PPT 기능만 비활성
+
 from __future__ import annotations
 import json, os, subprocess, tempfile
 from datetime import datetime
