@@ -1,955 +1,683 @@
 from __future__ import annotations
+import json, os, subprocess, tempfile
+from datetime import datetime
+from io import BytesIO
 
-import json
-from typing import Any
-
-import pandas as pd
 import streamlit as st
-
-from modules.catalog import catalog_to_dataframe_records, find_book, list_titles, load_catalog, load_methodology
-from modules.export_utils import dated_filename, markdown_to_docx_bytes, result_to_markdown
-from modules.lesson_generator import generate_lesson_plan, generate_question_cards, generate_scan_material, generate_worksheets
-from modules.pdf_utils import extract_text_from_upload
-from modules.question_analyzer import analyze_student_questions
-from modules.recommendation import recommend_picturebooks
-from modules.llm_client import is_mock_mode
+from openai import OpenAI
+from docx import Document
+from docx.shared import Pt
 
 st.set_page_config(
-    page_title="그림책 질문수업 코파일럿",
+    page_title="AI 그림책 질문수업 설계기",
     page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
-SAFETY_NOTICE = """
-- 개인정보: 학생 이름, 학교명, 반, 전화번호, 가족 정보 등은 입력하지 마세요.
-- 저작권: 스캔 원문을 장문으로 복제하지 않고, 요약·질문·활동으로 변환합니다.
-- 정서 안전: 학생의 마음을 진단하지 않고 관찰 가능한 표현과 안전한 질문으로 다룹니다.
-""".strip()
+# ═══════════════════════════════════════════════════════════════════
+# DB
+# ═══════════════════════════════════════════════════════════════════
+PICTUREBOOK_DB = [
+    {"id":"pb001","title":"말놀이 동시집","author":"최승호·방시혁","theme":["음운인식","어휘"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"동물 이름과 의성어로 구성된 말놀이 동시 모음","literacy_elements":["음운인식","어휘"],"reason":"한국어 음소·음절 인식, 운율 체험"},
+    {"id":"pb002","title":"수수께끼야 놀자","author":"이상교","theme":["음운인식","어휘"],"grade":["유치원","초등 1학년"],"summary":"수수께끼 형식으로 의미와 소리를 연결","literacy_elements":["음운인식"],"reason":"소리 단서로 단어 맞추기; 파닉스 연결"},
+    {"id":"pb003","title":"Brown Bear, Brown Bear","author":"Bill Martin Jr.","theme":["음운인식","어휘"],"grade":["유치원","초등 1학년"],"summary":"색깔과 동물 이름이 반복되는 패턴 그림책","literacy_elements":["음운인식","어휘"],"reason":"반복 패턴으로 운율·예측 읽기"},
+    {"id":"pb004","title":"단어 수집가","author":"Peter H. Reynolds","theme":["어휘","정체성"],"grade":["초등 1학년","초등 2학년","초등 3학년"],"summary":"소년이 세상의 단어들을 수집하는 이야기","literacy_elements":["어휘","음운인식"],"reason":"단어 가치 인식; 어휘 수집 동기 부여"},
+    {"id":"pb005","title":"알사탕","author":"백희나","theme":["어휘","감정 이해","가족"],"grade":["초등 1학년","초등 2학년"],"summary":"신비한 사탕을 먹으면 주변의 소리가 들린다","literacy_elements":["어휘","감정"],"reason":"감각어·감정 어휘 풍부; 서정적 표현"},
+    {"id":"pb006","title":"구름빵","author":"백희나","theme":["어휘","가족","상상력"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"비 오는 날 구름으로 빵을 만들어 날아다니는 이야기","literacy_elements":["어휘","이야기이해"],"reason":"요리·자연 어휘; 판타지 어휘 확장"},
+    {"id":"pb007","title":"수박 수영장","author":"안녕달","theme":["어휘","배경지식","다양성 존중","상상력"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"커다란 수박 속 수영장에서 동네 사람들이 함께 노는 상상","literacy_elements":["어휘","배경지식"],"reason":"여름·공동체·감각 어휘; 배경지식 확장"},
+    {"id":"pb008","title":"이상한 손님","author":"백희나","theme":["어휘","추론하기","배려"],"grade":["초등 1학년","초등 2학년"],"summary":"비 오는 날 하늘 나라에서 길 잃은 아이가 찾아온 이야기","literacy_elements":["어휘","추론"],"reason":"감정 어휘·비유 표현; 상황 맥락 어휘 추론"},
+    {"id":"pb009","title":"내 귀는 짝짝이","author":"율리 슈타르크","theme":["자존감","다양성 존중","정체성"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"귀가 다른 토끼가 자신을 있는 그대로 받아들이는 이야기","literacy_elements":["감정","자존감"],"reason":"신체 다양성 수용; 자기 긍정 감정 어휘"},
+    {"id":"pb010","title":"너는 특별하단다","author":"맥스 루케이도","theme":["자존감","정체성"],"grade":["유치원","초등 1학년","초등 2학년","초등 3학년"],"summary":"작은 나무 사람 펀치넬로가 자신의 가치를 깨닫는 이야기","literacy_elements":["감정","이야기이해"],"reason":"자존감 언어; 평가와 자기 가치 탐색"},
+    {"id":"pb011","title":"중요한 사실","author":"마가렛 와이즈 브라운","theme":["정체성","어휘"],"grade":["초등 1학년","초등 2학년"],"summary":"사물의 가장 중요한 특성에 대해 이야기하는 철학적 그림책","literacy_elements":["어휘","추론"],"reason":"핵심 특성 파악; 자아에 대한 질문 생성"},
+    {"id":"pb012","title":"고슴도치 X","author":"에밀리 그레이벳","theme":["친구 관계","감정 이해","의사소통"],"grade":["초등 1학년","초등 2학년"],"summary":"편지를 쓰다가 계속 틀려서 X로 지워나가는 고슴도치 이야기","literacy_elements":["감정","이야기이해"],"reason":"감정 표현의 어려움; 쓰기와 감정 연결"},
+    {"id":"pb013","title":"100만 번 산 고양이","author":"사노 요코","theme":["자존감","정체성","감정 이해"],"grade":["초등 2학년","초등 3학년","초등 4학년"],"summary":"100만 번을 살면서 진정한 사랑을 깨달은 고양이 이야기","literacy_elements":["이야기이해","감정"],"reason":"삶과 사랑의 의미; 감정 변화 추적"},
+    {"id":"pb014","title":"빈집에 온 손님","author":"김유경","theme":["두려움","용기","상상력"],"grade":["초등 1학년","초등 2학년"],"summary":"홀로 집을 지키던 아이가 상상 속 손님을 맞이하는 이야기","literacy_elements":["추론","감정"],"reason":"두려움과 상상력; 감정 탐색"},
+    {"id":"pb015","title":"무지개 물고기","author":"마르쿠스 피스터","theme":["어휘","배려","친구 관계"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"아름다운 비늘을 나눠주며 친구를 사귀는 물고기 이야기","literacy_elements":["어휘","감정"],"reason":"바닷속 어휘; 나눔·감정 표현 어휘"},
+    {"id":"pb016","title":"강아지똥","author":"권정생","theme":["자존감","감정 이해","배려"],"grade":["초등 1학년","초등 2학년","초등 3학년"],"summary":"아무도 거들떠보지 않던 강아지똥이 민들레의 거름이 된다","literacy_elements":["어휘","감정"],"reason":"자연 어휘·존재 가치 어휘; 문학적 표현"},
+    {"id":"pb017","title":"돼지책","author":"앤서니 브라운","theme":["가족","다양성 존중","의사소통"],"grade":["초등 2학년","초등 3학년","초등 4학년"],"summary":"혼자 집안일을 하던 엄마가 집을 나가고 가족이 돼지로 변한다","literacy_elements":["이야기이해","추론"],"reason":"인물 동기·감정 변화 추적; 시각 상징 분석"},
+    {"id":"pb018","title":"꽃들에게 희망을","author":"트리나 폴러스","theme":["자존감","정체성","용기"],"grade":["초등 2학년","초등 3학년","초등 4학년"],"summary":"애벌레가 자아를 찾아 나비가 되는 우화","literacy_elements":["어휘","추론"],"reason":"삶의 의미 어휘; 변화·희망 주제 어휘"},
+    {"id":"pb019","title":"고구마구마","author":"사이다","theme":["어휘","의사소통","감정 이해"],"grade":["유치원","초등 1학년"],"summary":"고구마가 '구마'라고만 말하는 반복 언어유희 그림책","literacy_elements":["어휘","음운인식"],"reason":"파닉스 연결; 반복 패턴 어휘 강화"},
+    {"id":"pb020","title":"괜찮아","author":"최숙희","theme":["자존감","다양성 존중","감정 이해"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"서로 다른 모습도 괜찮다는 자기 수용 이야기","literacy_elements":["감정","어휘"],"reason":"자기 수용·다양성 감정 표현 어휘"},
+    {"id":"pb021","title":"7년 동안의 잠","author":"박완서","theme":["배경지식","감정 이해"],"grade":["초등 2학년","초등 3학년"],"summary":"흉년 든 개미마을에 나타난 번데기를 둘러싼 이야기","literacy_elements":["이야기이해","배경지식"],"reason":"생태 배경지식; 발단·전개·결말 구조 분석"},
+    {"id":"pb022","title":"나쁜 어린이 표","author":"황선미","theme":["자존감","감정 이해"],"grade":["초등 1학년","초등 2학년","초등 3학년"],"summary":"잘못을 저지른 어린이가 표를 붙이고 다니는 이야기","literacy_elements":["이야기이해","감정"],"reason":"원인-결과; 인물 내면 변화 이해"},
+    {"id":"pb023","title":"선물","author":"이수지","theme":["상상력","감정 이해"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"눈이 오는 날의 감동을 글 없이 그림만으로 표현","literacy_elements":["추론"],"reason":"무자(wordless) 그림책; 그림 추론 최적"},
+    {"id":"pb024","title":"지각대장 존","author":"John Burningham","theme":["상상력","의사소통"],"grade":["초등 1학년","초등 2학년"],"summary":"매일 지각하는 존의 기상천외한 이유","literacy_elements":["이야기이해","추론"],"reason":"사실과 상상 구별; 인물 관점 이해"},
+    {"id":"pb025","title":"100층짜리 집","author":"이와이 도시오","theme":["배경지식","상상력"],"grade":["유치원","초등 1학년"],"summary":"주인공이 100층까지 올라가며 여러 동물을 만나는 이야기","literacy_elements":["이야기이해","배경지식"],"reason":"순서·수 개념; 동물 생태 배경지식"},
+    {"id":"pb026","title":"으뜸 헤엄이(Swimmy)","author":"Leo Lionni","theme":["친구 관계","용기","배려"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"혼자 헤엄치는 물고기가 친구들과 힘을 합치는 이야기","literacy_elements":["이야기 재구성","감정"],"reason":"시각적 장면 순서로 재구성 용이"},
+    {"id":"pb027","title":"The Very Hungry Caterpillar","author":"Eric Carle","theme":["배경지식","어휘"],"grade":["유치원","초등 1학년"],"summary":"배고픈 애벌레가 다양한 음식을 먹으며 성장하는 이야기","literacy_elements":["이야기 재구성","배경지식"],"reason":"요일·음식·변태 순서 재구성; 반복 구조"},
+    {"id":"pb028","title":"Where the Wild Things Are","author":"Maurice Sendak","theme":["감정 조절","상상력","가족"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"맥스가 상상의 세계로 여행하고 집으로 돌아오는 이야기","literacy_elements":["이야기 재구성","감정"],"reason":"여행 구조(출발-모험-귀환) 재구성 전형"},
+    {"id":"pb029","title":"In My Heart","author":"Jo Witek","theme":["감정 이해","감정 조절"],"grade":["유치원","초등 1학년"],"summary":"다양한 감정을 신체 감각으로 묘사하는 그림책","literacy_elements":["감정","어휘"],"reason":"감정 어휘 10가지 명시적 학습"},
+    {"id":"pb030","title":"왜냐하면(Because)","author":"Mo Willems","theme":["상상력","배경지식"],"grade":["초등 1학년","초등 2학년"],"summary":"연쇄적 원인-결과로 이어지는 이야기","literacy_elements":["이야기이해"],"reason":"'왜?' 질문 구조를 시각적으로 보여줌"},
+    {"id":"pb031","title":"Two Bad Ants","author":"Chris Van Allsburg","theme":["상상력","용기"],"grade":["초등 2학년","초등 3학년"],"summary":"두 개미가 설탕 그릇으로 모험을 떠나는 이야기","literacy_elements":["추론"],"reason":"개미 시점으로 보는 세상: 시각 추론의 정수"},
+    {"id":"pb032","title":"Voices in the Park","author":"앤서니 브라운","theme":["다양성 존중","친구 관계","의사소통"],"grade":["초등 2학년","초등 3학년","초등 4학년"],"summary":"같은 공원 방문을 4명의 서로 다른 목소리로 이야기","literacy_elements":["추론","이야기이해"],"reason":"관점 추론; 같은 사건의 다른 해석"},
+    {"id":"pb033","title":"선생님이 나를 모르면","author":"이상교","theme":["정체성","의사소통"],"grade":["초등 1학년"],"summary":"아이가 선생님에게 자신을 소개하는 이야기","literacy_elements":["이야기이해"],"reason":"나에 대한 질문 생성; 자기 이해 촉진"},
+    {"id":"pb034","title":"나는 어떻게 생겨났을까?","author":"과학그림책","theme":["배경지식","정체성"],"grade":["초등 1학년","초등 2학년"],"summary":"탄생의 과학적 사실을 어린이 눈높이로 설명","literacy_elements":["배경지식"],"reason":"배경지식 궁금증에서 질문 생성 자연 유도"},
+    {"id":"pb035","title":"The Invisible String","author":"Patrice Karst","theme":["감정 이해","두려움","가족"],"grade":["유치원","초등 1학년","초등 2학년"],"summary":"사랑하는 사람과의 보이지 않는 연결 이야기","literacy_elements":["감정"],"reason":"분리불안·연결감 감정; 저학년 적합"},
+]
 
-CARD_CSS = """
+def db_search(theme="", grade=""):
+    return [b for b in PICTUREBOOK_DB if
+            ((not theme) or any(theme in t for t in b["theme"])) and
+            ((not grade) or grade in b["grade"])]
+
+def db_get_by_title(title):
+    return next((b for b in PICTUREBOOK_DB if b["title"] == title), None)
+
+def db_all_themes():
+    t = set()
+    for b in PICTUREBOOK_DB: t.update(b["theme"])
+    return sorted(t)
+
+# ═══════════════════════════════════════════════════════════════════
+# CSS
+# ═══════════════════════════════════════════════════════════════════
+CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Jua&family=Nanum+Gothic:wght@400;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Gaegu:wght@700&family=Nanum+Gothic:wght@400;700;800&display=swap');
 
-/* ── 전역 배경 & 폰트 ── */
-html, body, [data-testid="stAppViewContainer"] {
-    background: linear-gradient(135deg, #fff9f0 0%, #fff0fb 40%, #f0f8ff 100%) !important;
-    font-family: 'Nanum Gothic', sans-serif !important;
-}
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main { background-color: #FFF9F0 !important; }
+[data-testid="stSidebar"] { display: none !important; }
+.main .block-container { max-width: 740px !important; padding: 1.8rem 1.4rem 3rem !important; }
 
-/* 배경 도트 패턴 */
-[data-testid="stAppViewContainer"]::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background-image: radial-gradient(circle, #ffb3d966 1.5px, transparent 1.5px);
-    background-size: 32px 32px;
-    pointer-events: none;
-    z-index: 0;
-}
+.app-header { text-align:center; padding:1.6rem 0 1.2rem; }
+.app-icon   { font-size:2.4rem; display:block; margin-bottom:6px;
+              animation:bob 3s ease-in-out infinite; }
+@keyframes bob { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-6px);} }
+.app-title  { font-family:'Gaegu',cursive !important; font-size:clamp(1.6rem,5vw,2.2rem) !important;
+              color:#3D2B1F !important; line-height:1.2 !important; margin:0 0 .3rem !important; }
+.app-sub    { font-size:.88rem; color:#7D5A4A; font-weight:700 !important; }
 
-/* ── 사이드바 ── */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #ff6b9d 0%, #c44ddb 50%, #7c4dff 100%) !important;
-    border-right: none !important;
-}
-[data-testid="stSidebar"] * {
-    color: #fff !important;
-}
-[data-testid="stSidebar"] .stMarkdown p,
-[data-testid="stSidebar"] .stMarkdown li {
-    color: rgba(255,255,255,0.92) !important;
-    font-size: 0.88rem;
-}
-[data-testid="stSidebar"] h1 {
-    font-family: 'Jua', sans-serif !important;
-    font-size: 1.5rem !important;
-    font-weight: 900 !important;
-    color: #fff !important;
-    -webkit-text-fill-color: #fff !important;
-    text-shadow: 0 2px 10px rgba(0,0,0,0.3), 0 0 20px rgba(255,255,255,0.2) !important;
-    letter-spacing: -0.3px;
-}
-[data-testid="stSidebar"] h3 {
-    font-family: 'Jua', sans-serif !important;
-    color: #fff !important;
-    -webkit-text-fill-color: #fff !important;
-    border-bottom: 2px solid rgba(255,255,255,0.4);
-    padding-bottom: 6px;
-    margin-top: 20px !important;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.2);
-}
-[data-testid="stSidebar"] [data-testid="stInfo"] {
-    background: rgba(255,255,255,0.15) !important;
-    border: 1px solid rgba(255,255,255,0.3) !important;
-    border-radius: 12px !important;
-    color: #fff !important;
-}
+.divider { height:2px;
+  background:repeating-linear-gradient(90deg,#FFCC80 0,#FFCC80 8px,transparent 8px,transparent 14px);
+  border:none; margin:1.4rem 0; }
 
-/* ── 탭 스타일 ── */
-[data-testid="stTabs"] [role="tablist"] {
-    background: rgba(255,255,255,0.7);
-    border-radius: 16px;
-    padding: 3px 4px;
-    gap: 2px;
-    backdrop-filter: blur(8px);
-    box-shadow: 0 2px 12px rgba(255,107,157,0.15);
-    flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    scrollbar-width: none;
-}
-[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar {
-    display: none;
-}
+.sec-label { font-family:'Gaegu',cursive !important; font-size:1.08rem !important;
+             color:#5D3A1A !important; font-weight:700 !important;
+             margin:0 0 .7rem !important; display:flex; align-items:center; gap:5px; }
+
+/* 폼 */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stTextInput"] > div > div > input,
+[data-testid="stTextArea"] > div > div > textarea {
+  border-radius:10px !important; border:2px solid #E8C9A0 !important;
+  background:#FFFDF7 !important; font-family:'Nanum Gothic',sans-serif !important; }
+[data-testid="stSelectbox"] > div > div:focus-within,
+[data-testid="stTextInput"] > div > div > input:focus,
+[data-testid="stTextArea"] > div > div > textarea:focus {
+  border-color:#FF7043 !important; box-shadow:0 0 0 3px #FF704320 !important; }
+
+/* 책 카드 */
+.book-card { background:linear-gradient(135deg,#FFF8E7,#FFF0F5);
+             border:2px solid #FFCC80; border-radius:12px;
+             padding:.85rem 1rem; margin:.4rem 0;
+             display:flex; gap:10px; align-items:flex-start; }
+.bc-icon  { font-size:1.5rem; flex-shrink:0; }
+.bc-title { font-weight:800; color:#3D2B1F; font-size:.88rem; }
+.bc-meta  { color:#9E8070; font-size:.76rem; margin-top:2px; line-height:1.4; }
+.bc-tags  { margin-top:4px; display:flex; flex-wrap:wrap; gap:3px; }
+.tag { background:#E8F5E9; color:#1B5E20; border:1px solid #A5D6A7;
+       border-radius:20px; padding:1px 7px; font-size:.67rem; font-weight:800; }
+
+/* AI 추천 칩 */
+.rec-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:.8rem; }
+.rec-chip {
+  background:white; border:2px solid #E8C9A0; border-radius:50px;
+  padding:6px 14px; font-size:.82rem; font-weight:700; color:#5D3A1A;
+  cursor:pointer; transition:border-color .15s,background .15s;
+  display:flex; align-items:center; gap:5px; }
+.rec-chip:hover { border-color:#FF7043; background:#FFF3EE; }
+.rec-chip .rn { font-weight:800; color:#FF7043; }
+
+/* 질문 카드 그리드 */
+.q-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+          gap:10px; margin-top:.6rem; }
+.q-card { background:white; border:2px solid #F0D9B8; border-radius:12px;
+          padding:.8rem .9rem; transition:transform .15s,box-shadow .15s; }
+.q-card:hover { transform:translateY(-3px); box-shadow:0 6px 16px #00000014; }
+.q-card .qt  { font-size:.67rem; font-weight:800; border-radius:20px;
+               padding:2px 8px; display:inline-block; margin-bottom:5px; }
+.q-card .qt.사실  { background:#E3F2FD; color:#1565C0; }
+.q-card .qt.추론  { background:#F3E5F5; color:#6A1B9A; }
+.q-card .qt.평가  { background:#E8F5E9; color:#1B5E20; }
+.q-card .qt.감정  { background:#FCE4EC; color:#880E4F; }
+.q-card .qt.작가  { background:#FFF3E0; color:#E65100; }
+.q-card .qt.삶연결{ background:#F1F8E9; color:#33691E; }
+.q-card .qtext { font-size:.82rem; color:#3D2B1F; line-height:1.5; }
+
+/* 단계 버튼 */
+.step-row { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:1rem 0; }
+.step-btn-wrap button {
+  border-radius:12px !important; font-family:'Gaegu',cursive !important;
+  font-size:.85rem !important; font-weight:700 !important; }
+
+/* 결과 아코디언 */
+[data-testid="stExpander"] {
+  background:white !important; border:2px solid #F0D9B8 !important;
+  border-radius:12px !important; margin-bottom:6px !important; }
+[data-testid="stExpander"]:hover { border-color:#FF7043 !important; }
+[data-testid="stExpander"] summary {
+  font-family:'Gaegu',cursive !important; font-size:.98rem !important;
+  font-weight:700 !important; color:#3D2B1F !important; padding:.55rem .9rem !important; }
+
+/* 메인 버튼 */
+[data-testid="baseButton-primary"] {
+  background:#FF7043 !important; border:none !important; border-radius:50px !important;
+  font-family:'Gaegu',cursive !important; font-size:1.05rem !important;
+  font-weight:700 !important; color:white !important;
+  box-shadow:0 4px 0 #BF360C !important; letter-spacing:1px;
+  transition:transform .1s,box-shadow .1s !important; }
+[data-testid="baseButton-primary"]:hover  { transform:translateY(-2px) !important; box-shadow:0 6px 0 #BF360C !important; }
+[data-testid="baseButton-primary"]:active { transform:translateY(2px) !important;  box-shadow:0 2px 0 #BF360C !important; }
+[data-testid="baseButton-secondary"] {
+  border-radius:50px !important; border:2px solid #E8C9A0 !important;
+  background:white !important; font-weight:700 !important;
+  transition:border-color .15s !important; }
+[data-testid="baseButton-secondary"]:hover { border-color:#FF7043 !important; }
+
+/* 탭 */
 [data-testid="stTabs"] [role="tab"] {
-    border-radius: 12px !important;
-    font-family: 'Nanum Gothic', sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 0.72rem !important;
-    padding: 5px 9px !important;
-    transition: all 0.2s !important;
-    color: #666 !important;
-    white-space: nowrap !important;
-    flex-shrink: 0 !important;
-}
+  font-family:'Gaegu',cursive !important; font-size:.95rem !important;
+  font-weight:700 !important; border-radius:10px 10px 0 0 !important; }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    background: linear-gradient(135deg, #ff6b9d, #c44ddb) !important;
-    color: #fff !important;
-    box-shadow: 0 3px 10px rgba(255,107,157,0.4) !important;
-}
+  color:#BF360C !important; border-bottom:3px solid #FF7043 !important; }
 
-/* ── 페이지 타이틀 (메인 영역만) ── */
-[data-testid="stMainBlockContainer"] h1 {
-    font-family: 'Jua', sans-serif !important;
-    background: linear-gradient(135deg, #ff6b9d, #7c4dff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    font-size: 2.2rem !important;
-}
-[data-testid="stMainBlockContainer"] h2,
-[data-testid="stMainBlockContainer"] h3 {
-    font-family: 'Jua', sans-serif !important;
-    color: #5c3d8f !important;
-}
+/* PPT 버튼 특별 색 */
+.ppt-wrap [data-testid="baseButton-secondary"] {
+  background:linear-gradient(135deg,#E8F5E9,#C8E6C9) !important;
+  border:2px solid #81C784 !important; color:#1B5E20 !important; }
 
-/* ── 기본 카드 ── */
-.card {
-    border: none;
-    border-radius: 20px;
-    padding: 22px 24px;
-    margin-bottom: 14px;
-    background: #fff;
-    box-shadow: 0 4px 20px rgba(196,77,219,0.10), 0 1px 4px rgba(0,0,0,0.04);
-    position: relative;
-    overflow: hidden;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-.card::before {
-    content: "";
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, #ff6b9d, #c44ddb, #7c4dff);
-}
-.card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 28px rgba(196,77,219,0.18);
-}
-.card h4 {
-    margin-top: 0;
-    font-family: 'Jua', sans-serif;
-    font-size: 1.05rem;
-    color: #5c3d8f;
-}
-.card p { color: #444; line-height: 1.7; }
-.small { color: #888; font-size: 0.88rem; }
-
-/* 홈 특화 카드 3종 */
-.card-pink::before  { background: linear-gradient(90deg, #ff6b9d, #ffb3d9); }
-.card-purple::before { background: linear-gradient(90deg, #c44ddb, #7c4dff); }
-.card-blue::before  { background: linear-gradient(90deg, #4db8ff, #7c4dff); }
-
-/* ── 히어로 배너 ── */
-.hero-banner {
-    background: linear-gradient(135deg, #ff6b9d 0%, #c44ddb 50%, #7c4dff 100%);
-    border-radius: 24px;
-    padding: 36px 40px;
-    margin-bottom: 28px;
-    color: #fff;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 8px 32px rgba(196,77,219,0.3);
-}
-.hero-banner::after {
-    content: "📚";
-    position: absolute;
-    right: 40px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 5rem;
-    opacity: 0.25;
-}
-.hero-banner h1 {
-    font-family: 'Jua', sans-serif !important;
-    font-size: 2.2rem !important;
-    color: #fff !important;
-    -webkit-text-fill-color: #fff !important;
-    margin: 0 0 8px !important;
-    text-shadow: 0 2px 12px rgba(0,0,0,0.15);
-}
-.hero-banner p {
-    color: rgba(255,255,255,0.9);
-    font-size: 1rem;
-    line-height: 1.6;
-    max-width: 680px;
-    margin: 0;
-}
-
-/* ── 흐름 배지 ── */
-.flow-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-    margin: 12px 0 20px;
-}
-.flow-badge {
-    background: linear-gradient(135deg, #ff6b9d22, #7c4dff22);
-    border: 1.5px solid #c44ddb44;
-    border-radius: 20px;
-    padding: 5px 14px;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #7c4dff;
-}
-.flow-arrow {
-    color: #c44ddb;
-    font-weight: 900;
-    font-size: 1rem;
-}
-
-/* ── 섹션 헤더 ── */
-.section-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: linear-gradient(135deg, #fff0fb, #f0f0ff);
-    border-radius: 14px;
-    padding: 12px 18px;
-    margin: 20px 0 14px;
-    border-left: 5px solid #c44ddb;
-}
-.section-header span {
-    font-family: 'Jua', sans-serif;
-    font-size: 1.1rem;
-    color: #5c3d8f;
-}
-
-/* ── 경고 박스 ── */
-.warning-box {
-    border: none;
-    border-left: 5px solid #ffb347;
-    padding: 14px 18px;
-    background: linear-gradient(135deg, #fffaf0, #fff5e0);
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(255,179,71,0.15);
-}
-.warning-box ul { margin: 6px 0 0; padding-left: 18px; }
-.warning-box li { color: #7a5c00; font-size: 0.9rem; margin-bottom: 4px; }
-
-/* ── 버튼 ── */
-[data-testid="stButton"] > button[kind="primary"] {
-    background: linear-gradient(135deg, #ff6b9d, #c44ddb) !important;
-    border: none !important;
-    border-radius: 14px !important;
-    font-family: 'Jua', sans-serif !important;
-    font-size: 1rem !important;
-    padding: 10px 28px !important;
-    color: #fff !important;
-    box-shadow: 0 4px 15px rgba(255,107,157,0.4) !important;
-    transition: all 0.2s !important;
-}
-[data-testid="stButton"] > button[kind="primary"]:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 6px 20px rgba(196,77,219,0.5) !important;
-}
-
-/* ── 다운로드 버튼 ── */
-[data-testid="stDownloadButton"] > button {
-    border-radius: 12px !important;
-    font-family: 'Nanum Gothic', sans-serif !important;
-    font-weight: 700 !important;
-}
-
-/* ── 입력 필드 ── */
-[data-testid="stTextInput"] input,
-[data-testid="stTextArea"] textarea {
-    border-radius: 12px !important;
-    border: 1.5px solid #e0c8f0 !important;
-    background: #fdf8ff !important;
-    font-family: 'Nanum Gothic', sans-serif !important;
-}
-[data-testid="stTextInput"] input:focus,
-[data-testid="stTextArea"] textarea:focus {
-    border-color: #c44ddb !important;
-    box-shadow: 0 0 0 3px rgba(196,77,219,0.12) !important;
-}
-[data-testid="stSelectbox"] > div > div {
-    border-radius: 12px !important;
-    border: 1.5px solid #e0c8f0 !important;
-    background: #fdf8ff !important;
-}
-
-/* ── 성공/정보 알림 ── */
-[data-testid="stSuccess"] {
-    background: linear-gradient(135deg, #f0fff4, #e8ffee) !important;
-    border-left: 5px solid #52c41a !important;
-    border-radius: 12px !important;
-}
-[data-testid="stInfo"] {
-    background: linear-gradient(135deg, #f0f8ff, #e8f4ff) !important;
-    border-left: 5px solid #4db8ff !important;
-    border-radius: 12px !important;
-}
-
-/* ── 데이터프레임 ── */
-[data-testid="stDataFrame"] {
-    border-radius: 16px !important;
-    overflow: hidden;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
-}
-
-/* ── Streamlit 상단 툴바 숨김 & 레이아웃 보정 ── */
-[data-testid="stHeader"] {
-    display: none !important;
-}
-#MainMenu { display: none !important; }
-footer { display: none !important; }
-
-/* 메인 컨테이너 여백 */
-[data-testid="stMainBlockContainer"] {
-    padding-top: 16px !important;
-    padding-bottom: 32px !important;
-}
-
-/* 탭 바 위 잘림 방지 */
-[data-testid="stTabs"] {
-    margin-top: 0 !important;
-}
-[data-testid="stTabs"] > div:first-child {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
+/* 반응형 */
+@media(max-width:600px){
+  .main .block-container{padding:1rem .8rem 2rem !important;}
+  .app-title{font-size:1.4rem !important;}
+  .q-grid{grid-template-columns:1fr;}
+  .step-row{grid-template-columns:1fr 1fr;}
 }
 </style>
 """
 
-st.markdown(CARD_CSS, unsafe_allow_html=True)
+PPTX_SCRIPT = os.path.join(os.path.dirname(__file__), "make_pptx.js")
 
-if "results" not in st.session_state:
-    st.session_state.results = {}
-if "last_title" not in st.session_state:
-    st.session_state.last_title = "그림책 질문수업"
+# ═══════════════════════════════════════════════════════════════════
+# OpenAI 헬퍼
+# ═══════════════════════════════════════════════════════════════════
+def get_client():
+    key = st.secrets.get("OPENAI_API_KEY", None) or os.getenv("OPENAI_API_KEY")
+    if not key:
+        st.error("OpenAI API 키가 없습니다. Streamlit Secrets에 OPENAI_API_KEY를 등록하세요.")
+        st.stop()
+    return OpenAI(api_key=key)
 
-
-@st.cache_data(show_spinner=False)
-def cached_catalog() -> list[dict[str, Any]]:
-    return load_catalog()
-
-
-@st.cache_data(show_spinner=False)
-def cached_titles() -> list[str]:
-    return list_titles()
-
-
-def save_result(key: str, label: str, title: str, result: Any) -> None:
-    st.session_state.results[key] = {
-        "label": label,
-        "title": title or "그림책 질문수업",
-        "result": result,
-    }
-    st.session_state.last_title = title or "그림책 질문수업"
-
-
-def show_json_like(result: Any) -> None:
-    if isinstance(result, dict):
-        for k, v in result.items():
-            st.subheader(k)
-            if isinstance(v, list):
-                if v and all(isinstance(x, dict) for x in v):
-                    st.dataframe(pd.DataFrame(v), use_container_width=True)
-                else:
-                    for item in v:
-                        st.markdown(f"- {item}")
-            elif isinstance(v, dict):
-                st.json(v)
-            else:
-                st.write(v)
-    elif isinstance(result, list):
-        st.dataframe(pd.DataFrame(result), use_container_width=True)
-    else:
-        st.markdown(str(result))
-
-
-def question_cards_view(cards: list[dict[str, str]]) -> None:
-    for card in cards:
-        st.markdown(
-            f"""
-<div class="card">
-<h4>{card.get('번호', '')}. {card.get('질문 유형', '')}</h4>
-<p><b>질문</b> | {card.get('질문', '')}</p>
-<p class="small"><b>의도</b> | {card.get('질문 의도', '')}</p>
-<p class="small"><b>예상 반응</b> | {card.get('예상 학생 반응', '')}</p>
-<p class="small"><b>후속 질문</b> | {card.get('후속 질문', '')}</p>
-<p class="small"><b>정서 안전성</b> | {card.get('정서 안전성 점검', '')}</p>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-
-with st.sidebar:
-    st.markdown("# 📚 질문수업 코파일럿")
-    st.caption("교사의 그림책 수업 설계를 돕는 Streamlit MVP")
-    st.markdown("### 🔒 안전 안내")
-    st.info(SAFETY_NOTICE)
-    st.markdown("### 🗂️ 현재 저장된 결과물")
-    if st.session_state.results:
-        icons = {
-            "recommendations": "📖",
-            "scan_material": "🔍",
-            "question_cards": "❓",
-            "lesson_plan": "📋",
-            "worksheets": "📝",
-            "student_question_analysis": "🙋",
-        }
-        for k, v in st.session_state.results.items():
-            icon = icons.get(k, "✅")
-            st.markdown(f"{icon} {v['label']}")
-    else:
-        st.markdown("_아직 생성된 결과물이 없습니다._")
-
-
-tabs = st.tabs(
-    [
-        "🏠 홈",
-        "📖 그림책 추천",
-        "🔍 SCAN 자료화",
-        "❓ 질문 10개",
-        "📋 지도안 만들기",
-        "🙋 학생 질문 수업화",
-        "💾 내보내기",
-    ]
-)
-
-with tabs[0]:
-    st.markdown(
-        """
-<div class="hero-banner">
-  <h1>📚 그림책 질문수업 코파일럿</h1>
-  <p>교사가 수업 상황 또는 vFlat SCAN OCR 텍스트를 입력하면<br>
-  그림책 추천 · 질문 10개 · 질문 중심 지도안 · 학생 활동지 · 마음성장노트를 바로 만들어 드려요!</p>
-</div>
-""",
-        unsafe_allow_html=True,
+def chat(system: str, user: str, max_tokens: int = 1200) -> str:
+    client = get_client()
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"system","content":system},
+                  {"role":"user","content":user}],
+        temperature=0.7,
+        max_tokens=max_tokens,
     )
+    return r.choices[0].message.content or ""
+
+# ── AI 추천 ──────────────────────────────────────────────────────
+def ai_recommend_books(situation: str) -> list[dict]:
+    db_titles = "\n".join(
+        f"- {b['title']} ({b['author']}): {b['summary']} [주제: {', '.join(b['theme'])}]"
+        for b in PICTUREBOOK_DB
+    )
+    resp = chat(
+        "당신은 초등 그림책 전문가입니다. 교사의 상황에 맞는 그림책을 추천하세요.",
+        f"""교사 상황: {situation}
+
+아래 그림책 목록 중 가장 적합한 책 4권을 추천하세요.
+반드시 목록에 있는 제목만 사용하고, JSON 배열로만 응답하세요.
+형식: [{{"title":"제목","reason":"한 문장 추천 이유"}}]
+
+그림책 목록:
+{db_titles}""",
+        max_tokens=600,
+    )
+    try:
+        import re
+        m = re.search(r'\[.*\]', resp, re.DOTALL)
+        return json.loads(m.group()) if m else []
+    except Exception:
+        return []
+
+# ── 질문 생성 ─────────────────────────────────────────────────────
+def gen_questions(grade, theme, book, book_info) -> dict:
+    book_ctx = f"작가: {book_info['author']}\n줄거리: {book_info['summary']}" if book_info else ""
+    resp = chat(
+        "당신은 초등 그림책 질문 수업 전문가입니다. 반드시 JSON으로만 응답하세요.",
+        f"""그림책: {book}
+{book_ctx}
+학년: {grade} / 주제: {theme}
+
+읽기 전 질문 3개, 읽는 중 질문 5개, 읽은 후 질문 5개를 만들어 주세요.
+각 질문은 사실/추론/평가/감정/작가/삶연결 중 하나의 유형을 가집니다.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{{"before":[{{"type":"유형","text":"질문"}},...],
+  "during":[{{"type":"유형","text":"질문"}},...],
+  "after" :[{{"type":"유형","text":"질문"}},...] }}""",
+        max_tokens=1200,
+    )
+    try:
+        import re
+        m = re.search(r'\{.*\}', resp, re.DOTALL)
+        return json.loads(m.group()) if m else {}
+    except Exception:
+        return {}
+
+# ── 활동 생성 ─────────────────────────────────────────────────────
+def gen_activities(grade, theme, book, lesson_time, student_context) -> str:
+    return chat(
+        "초등 수업 설계 전문가입니다. 한국어로 작성합니다.",
+        f"""학년:{grade} / 주제:{theme} / 그림책:{book} / 시간:{lesson_time}
+학생특성:{student_context or '없음'}
+
+아래 형식으로 3가지 활동을 설계해 주세요.
+## 활동 1: 도입 (활동명)
+- 목표: ...
+- 준비물: ...
+- 진행: ...
+- 교사 발문: ...
+
+## 활동 2: 중심 (활동명)
+[같은 형식]
+
+## 활동 3: 정리 (활동명)
+[같은 형식]""",
+        max_tokens=1400,
+    )
+
+# ── 지도안 생성 ───────────────────────────────────────────────────
+def gen_lessonplan(grade, theme, book, lesson_time, student_context) -> str:
+    return chat(
+        "초등 수업 설계 전문가입니다. 한국어로 작성합니다.",
+        f"""학년:{grade} / 주제:{theme} / 그림책:{book} / 시간:{lesson_time}
+학생특성:{student_context or '없음'}
+
+도입/전개/정리 단계 지도안을 표 형식으로 작성하세요.
+| 단계 | 시간 | 교사 활동 | 학생 활동 | 유의점 |
+각 단계별로 2~3행씩 작성합니다.""",
+        max_tokens=1000,
+    )
+
+# ── 평가+안내문 생성 ──────────────────────────────────────────────
+def gen_eval_parent(grade, theme, book) -> str:
+    return chat(
+        "초등 수업 평가 및 학부모 소통 전문가입니다. 한국어로 작성합니다.",
+        f"""학년:{grade} / 주제:{theme} / 그림책:{book}
+
+아래 두 가지를 작성해 주세요.
+
+## 평가 기준
+관찰 평가 기준 4개 (충분/보통/노력 필요 3단계)
+학생 자기평가 문항 3개
+
+## 학부모 안내문
+가정에 보내는 안내문 (그림책·주제 소개, 가정 대화 질문 3개, 따뜻한 어조)""",
+        max_tokens=900,
+    )
+
+# ── DOCX ─────────────────────────────────────────────────────────
+def make_docx(sections: dict, title: str) -> bytes:
+    doc = Document()
+    doc.styles["Normal"].font.name = "맑은 고딕"
+    doc.styles["Normal"].font.size = Pt(10.5)
+    doc.add_heading(title, level=1)
+    doc.add_paragraph(f"생성일: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    for sec_title, content in sections.items():
+        if content:
+            doc.add_heading(sec_title, level=2)
+            for line in content.splitlines():
+                s = line.strip()
+                if not s: doc.add_paragraph("")
+                elif s.startswith("## "): doc.add_heading(s[3:], level=3)
+                elif s.startswith(("- ","• ")):
+                    p = doc.add_paragraph(style="List Bullet"); p.add_run(s[2:])
+                else: doc.add_paragraph(s)
+    buf = BytesIO(); doc.save(buf); return buf.getvalue()
+
+# ── PPTX ─────────────────────────────────────────────────────────
+def make_pptx(grade, theme, book, lesson_time, questions, activities_text) -> bytes | None:
+    # 활동 파싱
+    acts = []
+    if activities_text:
+        import re
+        for m in re.finditer(r'##\s+활동\s*\d+[:：]\s*(.+?)\n(.*?)(?=##\s+활동|\Z)',
+                              activities_text, re.DOTALL):
+            title_act = m.group(1).strip()
+            body = m.group(2).strip()
+            desc_m = re.search(r'진행[:：]\s*(.+?)(?:\n|$)', body)
+            desc = desc_m.group(1).strip() if desc_m else body[:60]
+            icons = ["🌱","📖","✍️"]
+            acts.append({"icon": icons[len(acts) % 3], "title": title_act, "desc": desc})
+
+    # 수업 목표 (간단 생성)
+    obj_resp = chat(
+        "한국어로 간결하게 답변하세요.",
+        f"그림책 '{book}'로 {grade} {theme} 수업 목표 3개를 각각 한 문장으로 JSON 배열로만 답하세요. [\"목표1\",\"목표2\",\"목표3\"]",
+        max_tokens=200,
+    )
+    try:
+        import re
+        m = re.search(r'\[.*?\]', obj_resp, re.DOTALL)
+        objectives = json.loads(m.group()) if m else ["목표를 설정합니다.","질문을 만들어 봅니다.","생각을 표현합니다."]
+    except Exception:
+        objectives = ["목표를 설정합니다.","질문을 만들어 봅니다.","생각을 표현합니다."]
+
+    data = {
+        "title": f"「{book}」 질문수업",
+        "subtitle": "AI 그림책 질문수업 설계안",
+        "grade": grade,
+        "theme": theme,
+        "book": book,
+        "lesson_time": lesson_time,
+        "objectives": objectives,
+        "questions": questions or {},
+        "activities": acts or [
+            {"icon":"🌱","title":"배경지식 활성화","desc":"그림책 표지 탐색, 경험 나누기"},
+            {"icon":"📖","title":"대화형 읽기","desc":"PEER 절차로 그림책 읽기, 질문-응답"},
+            {"icon":"✍️","title":"표현 활동","desc":"느낀 점 쓰기, 그림으로 표현하기"},
+        ],
+        "evaluations": [],
+    }
+
+    json_str = json.dumps(data, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as f:
+        out_path = f.name
+
+    try:
+        result = subprocess.run(
+            ["node", PPTX_SCRIPT, json_str, out_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            st.error(f"PPT 생성 오류: {result.stderr[:200]}")
+            return None
+        with open(out_path, "rb") as f:
+            return f.read()
+    except Exception as e:
+        st.error(f"PPT 생성 실패: {e}")
+        return None
+    finally:
+        try: os.unlink(out_path)
+        except: pass
+
+# ═══════════════════════════════════════════════════════════════════
+# 질문 카드 렌더러
+# ═══════════════════════════════════════════════════════════════════
+def render_question_cards(questions: dict):
+    sections = [
+        ("before", "🌱 읽기 전"),
+        ("during", "🔍 읽는 중"),
+        ("after",  "💬 읽은 후"),
+    ]
+    for key, label in sections:
+        qs = questions.get(key, [])
+        if not qs: continue
+        st.markdown(f"**{label}**")
+        cols = st.columns(min(len(qs), 3))
+        for i, q in enumerate(qs):
+            qtype = q.get("type", "")
+            qtext = q.get("text", q) if isinstance(q, dict) else q
+            with cols[i % len(cols)]:
+                st.markdown(
+                    f'<div class="q-card">'
+                    f'<span class="qt {qtype}">{qtype}</span>'
+                    f'<div class="qtext">{qtext}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════
+def main():
+    st.markdown(CSS, unsafe_allow_html=True)
+
+    # ── 헤더 ──
+    st.markdown("""
+    <div class="app-header">
+      <span class="app-icon">📚</span>
+      <div class="app-title">AI 그림책 질문수업 설계기</div>
+      <p class="app-sub">학년 · 주제 · 그림책을 고르면 수업 초안을 단계별로 만들어 드려요</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+
+    # ── STEP 1: 수업 조건 ──────────────────────────────────────────
+    st.markdown('<div class="sec-label">① 수업 조건</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(
-            """
-<div class="card card-pink">
-  <h4>🌱 그림책을 수업 매개로</h4>
-  <p>그림책을 독서 자료에만 머물게 하지 않고 자존감, 다름, 친구 관계, 가족, 환경, 인권 등 <b>삶의 주제</b>로 연결합니다.</p>
-</div>""",
-            unsafe_allow_html=True,
+    with c1: grade = st.selectbox("학년", ["유치원","초등 1학년","초등 2학년","초등 3학년",
+                                            "초등 4학년","초등 5학년","초등 6학년"],
+                                   label_visibility="collapsed")
+    with c2: theme = st.selectbox("주제", db_all_themes(), label_visibility="collapsed")
+    with c3: lesson_time = st.selectbox("시간", ["40분","80분","120분","3차시","5차시"],
+                                         label_visibility="collapsed")
+    st.caption("📌 학년 　　 🎯 주제 　　 ⏰ 수업 시간")
+
+    student_context = st.text_area("학생 특성 (선택)",
+        placeholder="예: 1학년 입학 초기, 친구 관계가 서툰 편, 글쓰기 부담이 큼 등",
+        height=64, label_visibility="collapsed")
+    st.caption("📝 학생 특성 (선택)")
+
+    # ── STEP 2: 그림책 선택 ────────────────────────────────────────
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">② 그림책 선택</div>', unsafe_allow_html=True)
+
+    book_tab1, book_tab2, book_tab3 = st.tabs(["🤖 AI 추천", "📚 DB에서 찾기", "✏️ 직접 입력"])
+    book = ""
+    book_info = None
+
+    # ─ AI 추천 탭 ─
+    with book_tab1:
+        situation_input = st.text_area(
+            "우리 반 상황 입력",
+            placeholder='예: "우리 반은 친구 관계 갈등이 많아요"\n"자존감이 낮아 자기 표현을 못하는 아이들이 있어요"',
+            height=80, key="ai_situation", label_visibility="collapsed"
         )
-    with c2:
-        st.markdown(
-            """
-<div class="card card-purple">
-  <h4>💬 질문 중심 하브루타</h4>
-  <p>책 낭독 → 감상 나누기 → 질문 만들기 → 짝 토론하기 → 나만의 생각 쓰기 흐름을 기본으로 삼습니다.</p>
-</div>""",
-            unsafe_allow_html=True,
-        )
-    with c3:
-        st.markdown(
-            """
-<div class="card card-blue">
-  <h4>💛 마음성장노트</h4>
-  <p>학생을 진단하지 않고, 인물의 마음에서 출발해 나와 공동체의 실천으로 <b>안전하게 확장</b>합니다.</p>
-</div>""",
-            unsafe_allow_html=True,
-        )
+        st.caption("📌 우리 반 상황을 자유롭게 입력하면 AI가 맞는 그림책을 추천해 드려요")
 
-    st.markdown(
-        """
-<div class="section-header"><span>🗺️ 사용 흐름</span></div>
-<div class="flow-row">
-  <span class="flow-badge">📝 상황 입력</span>
-  <span class="flow-arrow">→</span>
-  <span class="flow-badge">📖 그림책 추천</span>
-  <span class="flow-arrow">→</span>
-  <span class="flow-badge">🔍 OCR 자료화</span>
-  <span class="flow-arrow">→</span>
-  <span class="flow-badge">❓ 질문 10개</span>
-  <span class="flow-arrow">→</span>
-  <span class="flow-badge">📋 지도안</span>
-  <span class="flow-arrow">→</span>
-  <span class="flow-badge">🙋 학생 질문 수업화</span>
-  <span class="flow-arrow">→</span>
-  <span class="flow-badge">💾 내보내기</span>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+        if st.button("🤖 그림책 추천받기", key="btn_ai_rec"):
+            if not situation_input.strip():
+                st.warning("상황을 입력해 주세요.")
+            else:
+                with st.spinner("AI가 그림책을 고르는 중..."):
+                    recs = ai_recommend_books(situation_input)
+                st.session_state["ai_recs"] = recs
 
-    catalog_all = cached_catalog()
+        if "ai_recs" in st.session_state and st.session_state["ai_recs"]:
+            st.markdown("**추천 그림책** — 선택하면 바로 적용됩니다")
+            chips_html = '<div class="rec-chips">'
+            for i, r in enumerate(st.session_state["ai_recs"]):
+                chips_html += (
+                    f'<div class="rec-chip">'
+                    f'<span class="rn">{i+1}</span> {r["title"]}'
+                    f'</div>'
+                )
+            chips_html += "</div>"
+            st.markdown(chips_html, unsafe_allow_html=True)
 
-    with st.expander(f"📚 내장 그림책 DB 미리보기  ({len(catalog_all)}권)"):
+            chosen = st.radio("선택", [r["title"] for r in st.session_state["ai_recs"]],
+                              label_visibility="collapsed", horizontal=True, key="ai_chosen")
+            if chosen:
+                book = chosen
+                book_info = db_get_by_title(chosen)
+                for r in st.session_state["ai_recs"]:
+                    if r["title"] == chosen:
+                        st.caption(f"💡 추천 이유: {r.get('reason','')}")
+                        break
 
-        grade_options = ["전체 학년", "1-2학년", "3-4학년", "5-6학년"]
-        filter_col1, filter_col2 = st.columns([2, 3])
-        with filter_col1:
-            selected_grade_filter = st.selectbox(
-                "학년으로 필터",
-                grade_options,
-                key="db_grade_filter",
-            )
-        with filter_col2:
-            search_keyword = st.text_input(
-                "주제·키워드 검색",
-                placeholder="예: 자존감, 두려움, 친구 관계 …",
-                key="db_keyword_search",
-            )
+    # ─ DB 탭 ─
+    with book_tab2:
+        show_db = st.toggle("🔍 전체 DB 탐색 펼치기", value=False)
+        if show_db:
+            fc1, fc2 = st.columns(2)
+            with fc1: ft = st.selectbox("주제", ["전체"] + db_all_themes(), key="dbt")
+            with fc2: fg = st.selectbox("학년", ["전체","유치원","초등 1학년","초등 2학년",
+                                                   "초등 3학년","초등 4학년"], key="dbg")
+            filtered = db_search("" if ft=="전체" else ft, "" if fg=="전체" else fg)
+            st.caption(f"검색 결과 {len(filtered)}권")
+            cards = ""
+            for b in filtered:
+                tags = "".join(f'<span class="tag">{t}</span>' for t in b["theme"][:2])
+                cards += (f'<div class="book-card" style="margin-bottom:6px;">'
+                          f'<span class="bc-icon">📕</span>'
+                          f'<div><div class="bc-title">{b["title"]}</div>'
+                          f'<div class="bc-meta">{b["author"]}</div>'
+                          f'<div class="bc-tags">{tags}</div></div></div>')
+            st.markdown(cards, unsafe_allow_html=True)
 
-        def grade_matches(band: str, sel: str) -> bool:
-            if sel == "전체 학년":
-                return True
-            nums = [int(x) for x in __import__("re").findall(r"[1-6]", band)]
-            if not nums:
-                return True
-            low, high = min(nums), max(nums)
-            if sel == "1-2학년":
-                return low <= 2
-            if sel == "3-4학년":
-                return low <= 4 and high >= 3
-            if sel == "5-6학년":
-                return high >= 5
-            return True
-
-        def keyword_matches(book: dict, kw: str) -> bool:
-            if not kw.strip():
-                return True
-            kw_lower = kw.strip().lower()
-            searchable = (
-                " ".join(book.get("main_themes", []))
-                + " ".join(book.get("emotion_keywords", []))
-                + book.get("story_summary", "")
-                + book.get("title", "")
-            ).lower()
-            return kw_lower in searchable
-
-        filtered = [
-            b for b in catalog_all
-            if grade_matches(b.get("recommended_grade_band", ""), selected_grade_filter)
-            and keyword_matches(b, search_keyword)
-        ]
-
-        st.markdown(
-            f"<p style='color:#888;font-size:0.88rem;margin:4px 0 12px;'>"
-            f"총 <b style='color:#c44ddb'>{len(catalog_all)}권</b> 중 "
-            f"<b style='color:#ff6b9d'>{len(filtered)}권</b> 표시 중</p>",
-            unsafe_allow_html=True,
-        )
-
-        GRADE_COLOR = {
-            "1": "#4db8ff", "2": "#4db8ff",
-            "3": "#ff9f43", "4": "#ff9f43",
-            "5": "#c44ddb", "6": "#c44ddb",
-        }
-
-        for book in filtered:
-            band = book.get("recommended_grade_band", "")
-            first_grade = __import__("re").search(r"[1-6]", band)
-            badge_color = GRADE_COLOR.get(first_grade.group() if first_grade else "1", "#888")
-            themes = " · ".join(book.get("main_themes", [])[:4])
-            emotions = " · ".join(book.get("emotion_keywords", [])[:4])
-            hooks = book.get("question_hooks", [])
-            activities = book.get("lesson_activity_ideas", [])
-            cautions = book.get("cautions", [])
-
-            label = f"📗 {book.get('title', '')}  |  {band}  |  {themes}"
-            with st.expander(label):
-                c_left, c_right = st.columns(2)
-                with c_left:
-                    st.markdown(
-                        f"<span style='background:{badge_color};color:#fff;"
-                        f"border-radius:8px;padding:2px 10px;font-size:0.8rem;"
-                        f"font-weight:700;'>{band}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(f"**✍️ 저자** {book.get('author','확인 필요')} / **출판사** {book.get('publisher','확인 필요')}")
-                    st.markdown(f"**📌 핵심 주제** {themes}")
-                    st.markdown(f"**💛 정서 키워드** {emotions}")
-                    st.markdown(f"**📖 줄거리** {book.get('story_summary','')}")
-                    if book.get("curriculum_links"):
-                        st.markdown("**🔗 교과 연계** " + " / ".join(book["curriculum_links"]))
-                with c_right:
-                    if hooks:
-                        st.markdown("**❓ 핵심 질문**")
-                        for q in hooks:
-                            st.markdown(f"- {q}")
-                    if activities:
-                        st.markdown("**🎨 수업 활동 아이디어**")
-                        for a in activities:
-                            st.markdown(f"- {a}")
-                    if cautions:
-                        st.markdown("**⚠️ 유의점**")
-                        for cau in cautions:
-                            st.markdown(
-                                f"<div class='warning-box' style='padding:8px 12px;margin:4px 0;'>"
-                                f"{cau}</div>",
-                                unsafe_allow_html=True,
-                            )
-
-    methodology = load_methodology()
-    with st.expander("📖 수업 원리 요약 보기"):
-        st.json(methodology)
-
-with tabs[1]:
-    st.markdown('<div class="section-header"><span>📖 상황 기반 그림책 추천</span></div>', unsafe_allow_html=True)
-    st.markdown("교사의 수업 상황을 입력하면 **내부 DB 추천**과 **인터넷 검색 추천**을 함께 제공합니다.")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        grade = st.selectbox(
-            "학년 선택",
-            ["초등학교 1학년", "초등학교 2학년", "초등학교 3학년", "초등학교 4학년", "초등학교 5학년", "초등학교 6학년"],
-            index=2,
-            key="recommend_grade",
-        )
-        subject = st.text_input("교과 입력", value="국어, 도덕, 창의적 체험활동", key="recommend_subject")
-        achievement = st.text_area(
-            "성취기준 입력",
-            value="인물의 마음을 짐작하고 자신의 생각을 친구와 나눈다.",
-            key="recommend_achievement",
-        )
-    with col2:
-        topic = st.text_input("수업 주제 입력", value="다름을 존중하기", key="recommend_topic")
-        class_context = st.text_area(
-            "학급 상황 입력",
-            value="친구의 외모나 말투를 놀리는 일이 있다.",
-            key="recommend_class_context",
-        )
-        lesson_minutes = st.slider("수업 시간 선택", 20, 80, 40, 5, key="recommend_lesson_minutes")
-        activity_style = st.multiselect(
-            "원하는 활동 방식 선택",
-            ["짝 토론", "모둠 토론", "생각 쓰기", "마음성장노트", "역할극", "활동지", "카드 만들기"],
-            default=["짝 토론", "생각 쓰기"],
-            key="recommend_activity_style",
-        )
-
-    if st.button("📖 그림책 추천하기", type="primary", key="recommend_button"):
-
-        activity_str = ", ".join(activity_style)
-
-        # ── ① 내부 DB 추천 ──
-        with st.spinner("📚 내부 DB에서 추천 중…"):
-            db_results = recommend_picturebooks(
-                cached_catalog(),
-                grade=grade,
-                subject=subject,
-                achievement=achievement,
-                topic=topic,
-                class_context=class_context,
-                lesson_minutes=lesson_minutes,
-                activity_style=activity_str,
-                top_n=5,
-            )
-
-        st.markdown('<div class="section-header"><span>📚 내부 DB 추천 결과</span></div>', unsafe_allow_html=True)
-        for i, r in enumerate(db_results):
-            with st.expander(f"{'⭐' if i == 0 else '📗'} {r['그림책 제목']}  |  {r['적합 학년']}  |  점수 {r['추천 점수']}점"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown(f"**📌 핵심 주제** {r['핵심 주제']}")
-                    st.markdown(f"**💛 정서 키워드** {r['정서 키워드']}")
-                    st.markdown(f"**💬 추천 이유** {r['추천 이유']}")
-                    st.markdown(f"**📋 수업 가능성** {r['질문 중심수업 가능성']}")
-                with c2:
-                    st.markdown(f"**❓ 핵심 질문** {r['핵심 질문 1개']}")
-                    st.markdown(f"**🎨 활동 아이디어** {r['수업 활동 아이디어']}")
-                    st.markdown(f"**⚠️ 유의점** {r['유의점']}")
-
-        save_result("recommendations", "그림책 추천표", topic, db_results)
-
-        # ── ② 인터넷 검색 추천 ──
-        from modules.recommendation import search_picturebooks_online
-        st.markdown('<div class="section-header"><span>🌐 인터넷 검색 추천 결과</span></div>', unsafe_allow_html=True)
-
-        if is_mock_mode():
-            st.info("💡 OPENAI_API_KEY를 설정하면 인터넷에서 추가 그림책을 검색합니다.")
+        rec = db_search(theme=theme, grade=grade)
+        if rec:
+            sel = st.selectbox(f"추천 ({len(rec)}권 — {grade} × {theme})",
+                               [b["title"] for b in rec])
+            book = sel
+            book_info = db_get_by_title(sel)
         else:
-            with st.spinner("🌐 인터넷에서 그림책 검색 중… (10~20초 소요)"):
-                web_results = search_picturebooks_online(
-                    grade=grade,
-                    topic=topic,
-                    class_context=class_context,
-                    activity_style=activity_str,
+            st.info("조건에 맞는 책이 없습니다.")
+
+    # ─ 직접 입력 탭 ─
+    with book_tab3:
+        custom = st.text_input("그림책 제목", placeholder="예: 알사탕", key="custom_book")
+        if custom:
+            book = custom
+            book_info = db_get_by_title(custom)
+            st.success("✅ DB에 있는 책입니다!" if book_info else "ℹ️ DB에 없는 책 — AI 일반 지식으로 진행합니다.")
+
+    # 선택된 책 표시
+    if book:
+        if book_info:
+            tags_html = "".join(f'<span class="tag">{e}</span>' for e in book_info["literacy_elements"])
+            st.markdown(
+                f'<div class="book-card">'
+                f'<span class="bc-icon">📕</span>'
+                f'<div><div class="bc-title">{book_info["title"]}</div>'
+                f'<div class="bc-meta">{book_info["author"]} · {book_info["summary"]}</div>'
+                f'<div class="bc-tags">{tags_html}</div></div></div>',
+                unsafe_allow_html=True)
+        else:
+            st.info(f"📖 선택된 책: **{book}**")
+
+    # ── STEP 3: 단계별 생성 ────────────────────────────────────────
+    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">③ 단계별 생성</div>', unsafe_allow_html=True)
+
+    if not book:
+        st.info("책을 먼저 선택해 주세요.")
+    else:
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        with sc1:
+            if st.button("❓ 질문 생성", use_container_width=True, key="btn_q"):
+                with st.spinner("질문 생성 중..."):
+                    qs = gen_questions(grade, theme, book, book_info)
+                st.session_state["questions"] = qs
+                st.session_state["q_meta"] = (grade, theme, book)
+
+        with sc2:
+            if st.button("🎨 활동 생성", use_container_width=True, key="btn_a"):
+                with st.spinner("활동 생성 중..."):
+                    acts = gen_activities(grade, theme, book, lesson_time, student_context)
+                st.session_state["activities"] = acts
+
+        with sc3:
+            if st.button("🗒️ 지도안 생성", use_container_width=True, key="btn_l"):
+                with st.spinner("지도안 생성 중..."):
+                    lp = gen_lessonplan(grade, theme, book, lesson_time, student_context)
+                st.session_state["lessonplan"] = lp
+
+        with sc4:
+            if st.button("⭐ 평가+안내문", use_container_width=True, key="btn_e"):
+                with st.spinner("평가·안내문 생성 중..."):
+                    ev = gen_eval_parent(grade, theme, book)
+                st.session_state["eval_parent"] = ev
+
+        # ── 결과 ──────────────────────────────────────────────────
+        has_any = any(k in st.session_state for k in
+                      ["questions","activities","lessonplan","eval_parent"])
+        if has_any:
+            st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="sec-label">④ 결과</div>', unsafe_allow_html=True)
+
+            if "questions" in st.session_state and st.session_state["questions"]:
+                with st.expander("❓ 질문 카드", expanded=True):
+                    render_question_cards(st.session_state["questions"])
+
+            if "activities" in st.session_state:
+                with st.expander("🎨 활동 생성"):
+                    st.markdown(st.session_state["activities"])
+
+            if "lessonplan" in st.session_state:
+                with st.expander("🗒️ 지도안"):
+                    st.markdown(st.session_state["lessonplan"])
+
+            if "eval_parent" in st.session_state:
+                with st.expander("⭐ 평가 & 학부모 안내문"):
+                    st.markdown(st.session_state["eval_parent"])
+
+            # ── 다운로드 & PPT ───────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            dl1, dl2, dl3 = st.columns([2, 2, 3])
+
+            sections_for_docx = {
+                "질문 생성": str(st.session_state.get("questions","")),
+                "활동": st.session_state.get("activities",""),
+                "지도안": st.session_state.get("lessonplan",""),
+                "평가·학부모 안내문": st.session_state.get("eval_parent",""),
+            }
+            docx_title = f"{book}_{theme}_질문수업설계안"
+
+            with dl1:
+                st.download_button(
+                    "📄 Word",
+                    data=make_docx(sections_for_docx, docx_title),
+                    file_name=f"{docx_title}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+            with dl2:
+                combined_md = "\n\n".join(
+                    f"## {k}\n{v}" for k, v in sections_for_docx.items() if v
+                )
+                st.download_button(
+                    "📝 Markdown",
+                    data=combined_md.encode("utf-8"),
+                    file_name=f"{docx_title}.md",
+                    mime="text/markdown",
+                    use_container_width=True,
                 )
 
-            if web_results and "오류" not in web_results[0].get("그림책 제목", ""):
-                for r in web_results:
-                    naver_url = f"https://search.naver.com/search.naver?query={r.get('구매 검색어', r['그림책 제목'])}+그림책"
-                    with st.expander(f"🌐 {r['그림책 제목']}  |  {r.get('저자','확인 필요')}  |  {r.get('출판사','확인 필요')}"):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.markdown(f"**🎓 적합 학년** {r.get('적합 학년','')}")
-                            st.markdown(f"**📌 핵심 주제** {r.get('핵심 주제','')}")
-                            st.markdown(f"**💬 추천 이유** {r.get('추천 이유','')}")
-                        with c2:
-                            st.markdown(f"**❓ 핵심 질문** {r.get('핵심 질문','')}")
-                            st.markdown(f"**🎨 수업 활동** {r.get('수업 활동','')}")
-                            st.markdown(f"[🔍 네이버에서 검색]({naver_url})", unsafe_allow_html=False)
-            else:
-                st.warning("인터넷 검색 결과를 가져오지 못했습니다. API 키와 모델을 확인해 주세요.")
+            with dl3:
+                st.markdown('<div class="ppt-wrap">', unsafe_allow_html=True)
+                if st.button("🎞️ PPT 생성 (Canva·발표용)", use_container_width=True, key="btn_ppt"):
+                    with st.spinner("🖍️ PPT 슬라이드 만드는 중..."):
+                        pptx_bytes = make_pptx(
+                            grade, theme, book, lesson_time,
+                            st.session_state.get("questions", {}),
+                            st.session_state.get("activities", ""),
+                        )
+                    if pptx_bytes:
+                        st.session_state["pptx_bytes"] = pptx_bytes
 
-with tabs[2]:
-    st.markdown('<div class="section-header"><span>🔍 vFlat SCAN 자료화</span></div>', unsafe_allow_html=True)
-    st.markdown(
-        "PDF·이미지를 업로드하면 **자동으로 텍스트를 추출**하고, 그림책 수업 자료로 변환합니다. "
-        "OPENAI_API_KEY가 설정되어 있으면 스캔 PDF·이미지도 Vision OCR로 자동 처리됩니다."
-    )
-    st.markdown(f"<div class='warning-box'>{SAFETY_NOTICE}</div>", unsafe_allow_html=True)
+                if "pptx_bytes" in st.session_state:
+                    st.download_button(
+                        "⬇️ PPT 다운로드",
+                        data=st.session_state["pptx_bytes"],
+                        file_name=f"{book}_{theme}_수업PPT.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        use_container_width=True,
+                    )
+                st.markdown("</div>", unsafe_allow_html=True)
 
-    uploaded = st.file_uploader(
-        "📁 PDF / JPG / PNG / TXT 업로드",
-        type=["pdf", "jpg", "jpeg", "png", "txt", "md"],
-        key="scan_file_uploader",
-    )
-    scan_title = st.text_input("📖 그림책 제목 입력", value="", key="scan_title_input")
 
-    # ── 자동 OCR: 파일이 바뀔 때마다 추출 ──
-    ocr_key = f"_ocr_cache_{uploaded.name if uploaded else 'none'}"
-    if uploaded and ocr_key not in st.session_state:
-        with st.spinner("📄 텍스트 추출 중…"):
-            extracted, status_msg = extract_text_from_upload(uploaded)
-            st.session_state[ocr_key] = (extracted, status_msg)
-    elif not uploaded:
-        extracted, status_msg = "", ""
-    else:
-        extracted, status_msg = st.session_state.get(ocr_key, ("", ""))
-
-    # 상태 메시지
-    if status_msg:
-        if status_msg.startswith("✅"):
-            st.success(status_msg)
-        else:
-            st.warning(status_msg)
-
-    # 추출된 텍스트 미리보기 (접기/펼치기)
-    if extracted and not extracted.startswith("⚠️"):
-        with st.expander("📄 추출된 텍스트 미리보기 (편집 가능)", expanded=False):
-            extracted = st.text_area(
-                "추출된 원문 (수정 가능)",
-                value=extracted,
-                height=260,
-                key="scan_extracted_preview",
-                label_visibility="collapsed",
-            )
-
-    # 직접 붙여넣기 (보완용)
-    pasted_ocr = st.text_area(
-        "✏️ OCR 텍스트 직접 붙여넣기 (보완 또는 대체)",
-        height=160,
-        placeholder="vFlat SCAN 등에서 추출한 텍스트를 여기에 붙여넣으면 자동 추출 내용과 합쳐집니다.",
-        key="scan_ocr_text",
-    )
-
-    col_btn, col_hint = st.columns([2, 5])
-    with col_btn:
-        run_scan = st.button("🔍 자료화하기", type="primary", key="scan_material_button")
-    with col_hint:
-        st.markdown(
-            "<p style='color:#aaa;font-size:0.82rem;padding-top:10px;'>"
-            "업로드 텍스트 + 직접 입력 텍스트를 합쳐서 분석합니다.</p>",
-            unsafe_allow_html=True,
-        )
-
-    if run_scan:
-        combined_text = "\n".join([extracted or "", pasted_ocr or ""]).strip()
-        if not combined_text:
-            st.warning("텍스트가 없습니다. 파일을 업로드하거나 OCR 텍스트를 붙여넣어 주세요.")
-        else:
-            with st.spinner("📝 수업 자료 생성 중…"):
-                material = generate_scan_material(scan_title, combined_text)
-            save_result("scan_material", "vFlat SCAN 자료화 결과", scan_title or "스캔 자료", material)
-            st.success("✅ 수업 자료화 결과를 생성했습니다.")
-            show_json_like(material)
-
-with tabs[3]:
-    st.markdown('<div class="section-header"><span>❓ 그림책 흐름에 따른 질문 10개 만들기</span></div>', unsafe_allow_html=True)
-    titles = ["직접 입력"] + cached_titles()
-    selected = st.selectbox("그림책 선택 또는 직접 입력", titles, key="question_book_selector")
-
-    if selected == "직접 입력":
-        q_title = st.text_input("그림책 제목", value="내 귀는 짝짝이", key="question_book_title_input")
-        default_summary = "다름을 이유로 놀림받던 인물이 자신의 모습을 받아들이고 당당해지는 이야기"
-    else:
-        book = find_book(selected)
-        q_title = selected
-        default_summary = book.get("story_summary", "") if book else ""
-        st.info(f"내부 DB 요약: {default_summary}")
-
-    q_summary = st.text_area(
-        "그림책 요약 또는 교사의 수업 구상",
-        value=default_summary,
-        height=140,
-        key="question_summary",
-    )
-    q_grade = st.selectbox(
-        "학년 선택",
-        ["초등학교 1학년", "초등학교 2학년", "초등학교 3학년", "초등학교 4학년", "초등학교 5학년", "초등학교 6학년"],
-        index=2,
-        key="question_grade",
-    )
-    q_topic = st.text_input("수업 주제", value="다름과 자기수용", key="question_topic")
-
-    if st.button("❓ 질문 10개 생성", type="primary", key="question_generate_button"):
-        cards = generate_question_cards(q_title, q_summary, q_grade, q_topic)
-        save_result("question_cards", "질문 10개 카드", q_title, cards)
-        st.success("질문 10개를 생성했습니다.")
-        st.dataframe(pd.DataFrame(cards), use_container_width=True)
-        st.markdown("### 질문카드 보기")
-        question_cards_view(cards)
-
-with tabs[4]:
-    st.markdown('<div class="section-header"><span>📋 질문 중심수업 지도안 만들기</span></div>', unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-
-    with col1:
-        lp_title = st.text_input(
-            "그림책 제목",
-            value=st.session_state.last_title if st.session_state.last_title != "그림책 질문수업" else "내 귀는 짝짝이",
-            key="lesson_book_title_input",
-        )
-        lp_grade = st.text_input("학년", value="초등학교 3학년", key="lesson_grade_input")
-        lp_subject = st.text_input("교과", value="국어, 도덕", key="lesson_subject_input")
-        lp_minutes = st.slider("수업 시간", 20, 80, 40, 5, key="lesson_minutes_slider")
-
-    with col2:
-        lp_idea = st.text_area(
-            "수업 구상",
-            value="다르다는 것은 고쳐야 할 문제가 아니라 존중하고 이해할 수 있는 특징임을 질문과 토론으로 나눈다.",
-            height=120,
-            key="lesson_idea_text",
-        )
-        existing_questions = ""
-        if "question_cards" in st.session_state.results:
-            existing_questions = "\n".join(
-                [x.get("질문", "") for x in st.session_state.results["question_cards"]["result"]]
-            )
-        lp_questions = st.text_area("질문 목록", value=existing_questions, height=180, key="lesson_questions_text")
-
-    if st.button("📋 지도안 생성", type="primary", key="lesson_generate_button"):
-        plan = generate_lesson_plan(lp_title, lp_grade, lp_subject, lp_minutes, lp_idea, lp_questions)
-        save_result("lesson_plan", "질문 중심수업 지도안", lp_title, plan)
-
-        st.success("지도안을 생성했습니다.")
-        st.subheader("수업 개요")
-        for k, v in plan.get("metadata", {}).items():
-            st.write(f"**{k}**: {', '.join(v) if isinstance(v, list) else v}")
-
-        st.subheader("도입-전개-정리 지도안")
-        st.dataframe(pd.DataFrame(plan.get("steps", [])), use_container_width=True)
-
-        worksheet = generate_worksheets(lp_title)
-        save_result("worksheets", "학생 활동지·짝 토론지·마음성장노트", lp_title, worksheet)
-
-        with st.expander("함께 생성된 활동지 보기"):
-            st.markdown(worksheet)
-
-with tabs[5]:
-    st.markdown('<div class="section-header"><span>🙋 학생 질문 수업화</span></div>', unsafe_allow_html=True)
-    st.markdown("학생 이름과 개인 정보를 지운 뒤 붙여넣어 주세요. 예시는 학생 A, 학생 B처럼 익명화합니다.")
-
-    sample_questions = """주인공은 왜 혼자 있었을까?
-친구들이 놀리지 않았다면 어떻게 되었을까?
-다르다는 것은 고쳐야 하는 걸까?
-나도 친구에게 상처받은 적 있니?
-우리 반에서 서로 다름을 인정하려면 무엇을 해야 할까?"""
-
-    student_qs = st.text_area(
-        "학생 질문 목록 붙여넣기",
-        value=sample_questions,
-        height=220,
-        key="student_question_text",
-    )
-
-    if st.button("🙋 질문 분류 및 수업화", type="primary", key="student_question_analyze_button"):
-        analysis = analyze_student_questions(student_qs)
-        save_result("student_question_analysis", "학생 질문 수업화 결과", "학생 질문", analysis)
-
-        st.success("학생 질문을 분류하고 수업화했습니다.")
-
-        st.subheader("유형별 분류 결과")
-        st.dataframe(pd.DataFrame(analysis["classified"]), use_container_width=True)
-
-        st.subheader("수업화하기 좋은 질문 3개")
-        st.dataframe(pd.DataFrame(analysis["recommended"]), use_container_width=True)
-
-        st.subheader("토론·글쓰기·활동지 질문으로 변환")
-        st.dataframe(pd.DataFrame(analysis["teaching_variants"]), use_container_width=True)
-
-        if analysis["safe_rewrites"]:
-            st.subheader("정서적으로 조심할 질문과 안전한 변환")
-            st.dataframe(pd.DataFrame(analysis["safe_rewrites"]), use_container_width=True)
-
-with tabs[6]:
-    st.markdown('<div class="section-header"><span>💾 내보내기</span></div>', unsafe_allow_html=True)
-
-    if not st.session_state.results:
-        st.info("먼저 다른 탭에서 결과물을 생성해 주세요.")
-    else:
-        labels = {key: val["label"] for key, val in st.session_state.results.items()}
-
-        selected_key = st.selectbox(
-            "현재 생성 결과 선택",
-            list(labels.keys()),
-            format_func=lambda k: labels[k],
-            key="export_result_selector",
-        )
-
-        selected_result = st.session_state.results[selected_key]
-        md_text = result_to_markdown(
-            selected_result["title"],
-            selected_result["label"],
-            selected_result["result"],
-        )
-
-        st.text_area("복사하기용 텍스트", value=md_text, height=420, key="export_copy_text")
-
-        md_filename = dated_filename(selected_result["title"], selected_key, "md")
-        docx_filename = dated_filename(selected_result["title"], selected_key, "docx")
-
-        st.download_button(
-            "📄 Markdown 다운로드",
-            data=md_text.encode("utf-8"),
-            file_name=md_filename,
-            mime="text/markdown",
-            key="export_markdown_button",
-        )
-
-        try:
-            docx_bytes = markdown_to_docx_bytes(md_text)
-            st.download_button(
-                "📝 DOCX 다운로드",
-                data=docx_bytes,
-                file_name=docx_filename,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="export_docx_button",
-            )
-        except Exception as exc:
-            st.warning(f"DOCX 생성 중 오류가 발생했습니다. Markdown 다운로드를 사용해 주세요. 오류: {exc}")
+if __name__ == "__main__":
+    main()
